@@ -1,0 +1,78 @@
+Package: OrchestratingSingleCellAnalysisBook
+Title: Compiling the OSCA Book on Bioconductor
+Version: 0.99.0
+Date: 2020-08-12
+Authors@R: person(role=c("aut", "cre"), "Aaron", "Lun", email = "infinite.monkeys.with.keyboards@gmail.com")
+Description: 
+    Serves as a vehicle to compile the "Orchestrating Single-Cell Analyses with
+    Bioconductor" book (https://osca.bioconductor.org) on the Bioconductor
+    build machines. Book chapters are transplanted into the vignettes
+    subdirectory where the build system can be deceived into compiling them.
+    The compiled book is then available in the tarball for deployment on the
+    site of your choice.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+VignetteBuilder: knitr
+biocViews: ImmunoOncologyWorkflow, Workflow, SingleCellWorkflow
+Workflow: True
+NeedsCompilation: no
+URL: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis
+RoxygenNote: 7.1.0
+Imports: AnnotationHub,
+  AUCell,
+  basilisk,
+  batchelor,
+  BiocFileCache,
+  BiocNeighbors,
+  BiocParallel,
+  BiocSingular,
+  BiocStyle,
+  bluster,
+  callr,
+  celldex,
+  cluster,
+  clustree,
+  CodeDepends,
+  DelayedMatrixStats,
+  dendextend,
+  DropletUtils,
+  dynamicTreeCut,
+  edgeR,
+  EnsDb.Hsapiens.v86,
+  ggbeeswarm,
+  GO.db,
+  gridExtra,
+  GSEABase,
+  HCAData,
+  igraph,
+  iSEE,
+  knitr,
+  limma,
+  Matrix,
+  methods,
+  MouseGastrulationData,
+  msigdbr,
+  org.Hs.eg.db,
+  org.Mm.eg.db,
+  PCAtools,
+  pheatmap,
+  rmarkdown,
+  RMTstat,
+  robustbase,
+  Rtsne,
+  scater,
+  scPCA,
+  scran,
+  scRNAseq,
+  scuttle,
+  SingleCellExperiment,
+  SingleR,
+  slingshot,
+  statmod,
+  TENxBrainData,
+  TENxPBMCData,
+  tradeSeq,
+  utils,
+  uwot,
+  viridis
