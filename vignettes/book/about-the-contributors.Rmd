@@ -1,0 +1,43 @@
+# (PART) Appendix {-}
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+# Contributors
+
+### *Aaron Lun, PhD* {-}
+
+When one thinks of single-cell bioinformatics, one thinks of several titans who bestride the field.
+Unfortunately, they weren't available, so we had to make do with Aaron instead.
+He likes long walks on the beach (as long as there's Wifi) and travelling (but only in business class).
+His friends say that he is "absolutely insane" and "needs to get a life", or they would if they weren't mostly imaginary.
+His GitHub account is his Facebook and his Slack is his Twitter.
+He maintains more Bioconductor packages than he has phone numbers on his cell.
+He has a recurring event on his Google Calendar to fold his laundry.
+He is... the most boring man in the world.
+("I don't often cry when I watch anime, but when I do, my tears taste like Dos Equis.")
+He currently works as a Scientist at Genentech after a stint as a research associate in John Marioni's group at the CRUK Cambridge Institute, which was preceded by a PhD with Gordon Smyth at the Walter and Eliza Hall Institute for Medical Research.
+
+### *Robert Amezquita, PhD* {-}
+
+Robert Amezquita is a Postdoctoral Fellow in the Immunotherapy Integrated Research Center (IIRC) at Fred Hutch under the mentorship of Raphael Gottardo. His current research focuses on utilizing computational approaches leveraging transcriptional and epigenomic profiling at single-cell resolution to understand how novel anti-cancer therapeutics - ranging from small molecule therapies to biologics such as CAR-T cells - affect immune response dynamics. Extending from his graduate work at Yale's Dept. of Immunobiology, Robert's research aims to better understand the process of immune cell differentiation under the duress of cancer as a means to inform future immunotherapies. To accomplish this, Robert works collaboratively across the Fred Hutch IIRC with experimental collaborators, extensively utilizing R and Bioconductor for data analysis.
+
+
+### *Stephanie Hicks, PhD* {-}
+
+Stephanie Hicks is an Assistant Professor in the [Department of Biostatistics](https://www.jhsph.edu/departments/biostatistics/) at [Johns Hopkins Bloomberg School of Public Health](https://www.jhsph.edu). Her research interests focus around developing statistical methods, tools and software for the analysis of genomics data. Specifically, her research addresses statistical challenges in epigenomics, functional genomics and single-cell genomics such as the pre-processing, normalization, analysis of noisy high-throughput data leading to an improved quantification and understanding of biological variability. She actively contributes software packages to [Bioconductor](https://bioconductor.org) and is involved in teaching courses for data science and the analysis of genomics data. She is also a faculty member of the [Johns Hopkins Data Science Lab](https://jhudatascience.org), co-host of [The Corresponding Author](https://twitter.com/CorrespondAuth) podcast and co-founder of [R-Ladies Baltimore](https://rladies-baltimore.github.io). For more information, please see http://www.stephaniehicks.com
+
+
+### *Raphael Gottardo, PhD* {-}
+
+Raphael Gottardo is the Scientific Director of the Translational Data Science Integrated Research Center (TDS IRC) at Fred Hutch, J. Ordin Edson Foundation Endowed Chair, and Full Member within the Vaccine and Infectious Disease and Public Health Sciences Division. A pioneer in developing and applying statistical methods and software tools to distill actionable insights from large and complex biological data sets.In partnership with scientists and clinicians, he works to understand such diseases as cancer, HIV, malaria, and tuberculosis and inform the development of vaccines and treatments. He is a leader in forming interdisciplinary collaborations across the Hutch, as well as nationally and internationally, to address important research questions, particularly in the areas of vaccine research, human immunology, and immunotherapy. As director of the Translational Data Science Integrated Research Center, he fosters interaction between the Hutch’s experimental and clinical researchers and their computational and quantitative science colleagues with the goal of transforming patient care through data-driven research. Dr. Gottardo partners closely with the cancer immunotherapy program at Fred Hutch to improve treatments. For example, his team is harnessing cutting-edge computational methods to determine how cancers evade immunotherapy. He has made significant contributions to vaccine research and is the principal investigator of the Vaccine and Immunology Statistical Center of the Collaboration for AIDS Vaccine Discovery.
+
+### Other notable entities {-}
+
+Kevin Rue-Albrecht (University of Oxford, United Kingdom), for contributing the interactive data analysis chapter.
+
+Charlotte Soneson (Friedrich Miescher Institute, Switzerland), for many formatting and typographical fixes.
+
+Al J Abadi (University of Melbourne, Australia), for bringing the log-normalization corner case to our attention.

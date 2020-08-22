@@ -1,7 +1,7 @@
 Package: OrchestratingSingleCellAnalysisBook
 Title: Compiling the OSCA Book on Bioconductor
-Version: 0.99.0
-Date: 2020-08-12
+Version: 0.99.1
+Date: 2020-08-22
 Authors@R: person(role=c("aut", "cre"), "Aaron", "Lun", email = "infinite.monkeys.with.keyboards@gmail.com")
 Description: 
     Serves as a vehicle to compile the "Orchestrating Single-Cell Analyses with
@@ -29,11 +29,9 @@ Imports: AnnotationHub,
   BiocSingular,
   BiocStyle,
   bluster,
-  callr,
   celldex,
   cluster,
   clustree,
-  CodeDepends,
   DelayedMatrixStats,
   dendextend,
   DropletUtils,
@@ -49,15 +47,12 @@ Imports: AnnotationHub,
   iSEE,
   knitr,
   limma,
-  Matrix,
-  methods,
   MouseGastrulationData,
   msigdbr,
   org.Hs.eg.db,
   org.Mm.eg.db,
   PCAtools,
   pheatmap,
-  rmarkdown,
   RMTstat,
   robustbase,
   Rtsne,
@@ -73,6 +68,5 @@ Imports: AnnotationHub,
   TENxBrainData,
   TENxPBMCData,
   tradeSeq,
-  utils,
   uwot,
   viridis

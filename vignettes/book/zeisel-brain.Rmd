@@ -1,0 +1,209 @@
+# Zeisel mouse brain (STRT-Seq)
+
+```{r unref-setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble(cache=TRUE)
+```
+
+## Introduction
+
+Here, we examine a heterogeneous dataset from a study of cell types in the mouse brain [@zeisel2015brain].
+This contains approximately 3000 cells of varying types such as oligodendrocytes, microglia and neurons.
+Individual cells were isolated using the Fluidigm C1 microfluidics system [@pollen2014lowcoverage] and library preparation was performed on each cell using a UMI-based protocol.
+After sequencing, expression was quantified by counting the number of unique molecular identifiers (UMIs) mapped to each gene.
+
+## Data loading
+
+We obtain a `SingleCellExperiment` object for this dataset using the relevant function from the `r Biocpkg("scRNAseq")` package.
+The idiosyncrasies of the published dataset means that we need to do some extra work to merge together redundant rows corresponding to alternative genomic locations for the same gene.
+
+```{r loading}
+library(scRNAseq)
+sce.zeisel <- ZeiselBrainData()
+
+library(scater)
+sce.zeisel <- aggregateAcrossFeatures(sce.zeisel, 
+    id=sub("_loc[0-9]+$", "", rownames(sce.zeisel)))
+```
+
+We also fetch the Ensembl gene IDs, just in case we need them later.
+
+```{r gene-annotation}
+library(org.Mm.eg.db)
+rowData(sce.zeisel)$Ensembl <- mapIds(org.Mm.eg.db, 
+    keys=rownames(sce.zeisel), keytype="SYMBOL", column="ENSEMBL")
+```
+
+## Quality control
+
+```{r}
+unfiltered <- sce.zeisel
+```
+
+The original authors of the study have already removed low-quality cells prior to data publication.
+Nonetheless, we compute some quality control metrics to check whether the remaining cells are satisfactory.
+
+```{r quality-control}
+stats <- perCellQCMetrics(sce.zeisel, subsets=list(
+    Mt=rowData(sce.zeisel)$featureType=="mito"))
+qc <- quickPerCellQC(stats, percent_subsets=c("altexps_ERCC_percent", 
+    "subsets_Mt_percent"))
+sce.zeisel <- sce.zeisel[,!qc$discard]
+```
+
+```{r unref-zeisel-qc-dist, fig.wide=TRUE, fig.cap="Distribution of each QC metric across cells in the Zeisel brain dataset. Each point represents a cell and is colored according to whether that cell was discarded."}
+colData(unfiltered) <- cbind(colData(unfiltered), stats)
+unfiltered$discard <- qc$discard
+
+gridExtra::grid.arrange(
+    plotColData(unfiltered, y="sum", colour_by="discard") +
+        scale_y_log10() + ggtitle("Total count"),
+    plotColData(unfiltered, y="detected", colour_by="discard") +
+        scale_y_log10() + ggtitle("Detected features"),
+    plotColData(unfiltered, y="altexps_ERCC_percent",
+        colour_by="discard") + ggtitle("ERCC percent"),
+    plotColData(unfiltered, y="subsets_Mt_percent",
+        colour_by="discard") + ggtitle("Mito percent"),
+    ncol=2
+)
+```
+
+```{r unref-zeisel-qc-comp, fig.cap="Percentage of mitochondrial reads in each cell in the Zeisel brain dataset, compared to the total count (left) or the percentage of spike-in reads (right). Each point represents a cell and is colored according to whether that cell was discarded."}
+gridExtra::grid.arrange(
+    plotColData(unfiltered, x="sum", y="subsets_Mt_percent",
+        colour_by="discard") + scale_x_log10(),
+    plotColData(unfiltered, x="altexps_ERCC_percent", y="subsets_Mt_percent",
+        colour_by="discard"),
+    ncol=2
+)
+```
+
+We also examine the number of cells removed for each reason.
+
+```{r}
+colSums(as.matrix(qc))
+```
+
+## Normalization
+
+```{r normalization}
+library(scran)
+set.seed(1000)
+clusters <- quickCluster(sce.zeisel)
+sce.zeisel <- computeSumFactors(sce.zeisel, cluster=clusters) 
+sce.zeisel <- logNormCounts(sce.zeisel)
+```
+
+```{r}
+summary(sizeFactors(sce.zeisel))
+```
+
+```{r unref-zeisel-norm, fig.cap="Relationship between the library size factors and the deconvolution size factors in the Zeisel brain dataset."}
+plot(librarySizeFactors(sce.zeisel), sizeFactors(sce.zeisel), pch=16,
+    xlab="Library size factors", ylab="Deconvolution factors", log="xy")
+```
+
+## Variance modelling
+
+In theory, we should block on the plate of origin for each cell.
+However, only 20-40 cells are available on each plate, and the population is also highly heterogeneous.
+This means that we cannot assume that the distribution of sampled cell types on each plate is the same.
+Thus, to avoid regressing out potential biology, we will not block on any factors in this analysis.
+
+```{r variance-modelling}
+dec.zeisel <- modelGeneVarWithSpikes(sce.zeisel, "ERCC")
+top.hvgs <- getTopHVGs(dec.zeisel, prop=0.1)
+```
+
+We see from Figure \@ref(fig:unref-zeisel-var) that the technical and total variances are much smaller than those in the read-based datasets.
+This is due to the use of UMIs, which reduces the noise caused by variable PCR amplification.
+Furthermore, the spike-in trend is consistently lower than the variances of the endogenous gene, which reflects the heterogeneity in gene expression across cells of different types.
+
+```{r unref-zeisel-var, fig.cap="Per-gene variance as a function of the mean for the log-expression values in the Zeisel brain dataset. Each point represents a gene (black) with the mean-variance trend (blue) fitted to the spike-in transcripts (red)."}
+plot(dec.zeisel$mean, dec.zeisel$total, pch=16, cex=0.5,
+    xlab="Mean of log-expression", ylab="Variance of log-expression")
+curfit <- metadata(dec.zeisel)
+points(curfit$mean, curfit$var, col="red", pch=16)
+curve(curfit$trend(x), col='dodgerblue', add=TRUE, lwd=2)
+```
+
+## Dimensionality reduction
+
+```{r dimensionality-reduction}
+library(BiocSingular)
+set.seed(101011001)
+sce.zeisel <- denoisePCA(sce.zeisel, technical=dec.zeisel, subset.row=top.hvgs)
+sce.zeisel <- runTSNE(sce.zeisel, dimred="PCA")
+```
+
+We have a look at the number of PCs retained by `denoisePCA()`.
+
+```{r}
+ncol(reducedDim(sce.zeisel, "PCA"))
+```
+
+## Clustering
+
+```{r clustering}
+snn.gr <- buildSNNGraph(sce.zeisel, use.dimred="PCA")
+colLabels(sce.zeisel) <- factor(igraph::cluster_walktrap(snn.gr)$membership)
+```
+
+```{r}
+table(colLabels(sce.zeisel))
+```
+
+```{r unref-zeisel-tsne, fig.cap="Obligatory $t$-SNE plot of the Zeisel brain dataset, where each point represents a cell and is colored according to the assigned cluster."}
+plotTSNE(sce.zeisel, colour_by="label")
+```
+
+## Interpretation
+
+```{r, echo=FALSE, results="hide"}
+# Hidden variables for use in text or hidden chunks,
+# to avoid the need for manual changes.
+chosen.inter.cluster <- 1
+```
+
+We focus on upregulated marker genes as these can quickly provide positive identification of cell type in a heterogeneous population.
+We examine the table for cluster `r chosen.inter.cluster`, in which log-fold changes are reported between cluster `r chosen.inter.cluster` and every other cluster.
+The same output is provided for each cluster in order to identify genes that discriminate between clusters.
+
+```{r}
+markers <- findMarkers(sce.zeisel, direction="up")
+marker.set <- markers[["1"]]
+head(marker.set[,1:8], 10) # only first 8 columns, for brevity
+```
+
+```{r, echo=FALSE, results="hide"}
+stopifnot(identical(marker.set, markers[[chosen.inter.cluster]]))
+
+# Checking the cluster is what we wanted.
+lfc <- getMarkerEffects(marker.set)
+stopifnot(all(sign(lfc[marker.set$originalName=="Gad1",])==1))
+stopifnot(all(sign(lfc[marker.set$originalName=="Gad2",])==1))
+```
+
+Figure \@ref(fig:unref-zeisel-heat-cell) indicates that most of the top markers are strongly DE in cells of cluster `r chosen.inter.cluster` compared to some or all of the other clusters.
+We can use these markers to identify cells from cluster `r chosen.inter.cluster` in validation studies with an independent population of cells.
+A quick look at the markers suggest that cluster `r chosen.inter.cluster` represents interneurons based on expression of *Gad1* and *Slc6a1* [@zeng2012largescale].
+
+```{r unref-zeisel-heat-cell, fig.wide=TRUE, fig.asp=1.5, fig.cap=sprintf("Heatmap of the log-expression of the top markers for cluster %s compared to each other cluster. Cells are ordered by cluster and the color is scaled to the log-expression of each gene in each cell.", chosen.inter.cluster)}
+top.markers <- rownames(marker.set)[marker.set$Top <= 10]
+plotHeatmap(sce.zeisel, features=top.markers, order_columns_by="label")
+```
+
+An alternative visualization approach is to plot the log-fold changes to all other clusters directly (Figure \@ref(fig:unref-zeisel-heat-lfc)).
+This is more concise and is useful in situations involving many clusters that contain different numbers of cells.
+
+```{r unref-zeisel-heat-lfc, fig.asp=1.5, fig.cap=sprintf("Heatmap of the log-fold changes of the top markers for cluster %s compared to each other cluster.", chosen.inter.cluster)}
+library(pheatmap)
+logFCs <- getMarkerEffects(marker.set[1:50,])
+pheatmap(logFCs, breaks=seq(-5, 5, length.out=101))
+```
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

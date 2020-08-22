@@ -1,0 +1,468 @@
+---
+output:
+  html_document
+bibliography: ../ref.bib
+---
+
+# Integrating with protein abundance
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+## Motivation
+
+Cellular indexing of transcriptomes and epitopes by sequencing (CITE-seq) is a technique that quantifies both gene expression and the abundance of selected surface proteins in each cell simultaneously [@stoeckius2017simultaneous].
+In this approach, cells are first labelled with antibodies that have been conjugated to synthetic RNA tags.
+A cell with a higher abundance of a target protein will be bound by more antibodies, causing more molecules of the corresponding antibody-derived tag (ADT) to be attached to that cell.
+Cells are then separated into their own reaction chambers using droplet-based microfluidics [@zheng2017massively].
+Both the ADTs and endogenous transcripts are reverse-transcribed and captured into a cDNA library; the abundance of each protein or expression of each gene is subsequently quantified by sequencing of each set of features.
+This provides a powerful tool for interrogating aspects of the proteome (such as post-translational modifications) and other cellular features that would normally be invisible to transcriptomic studies.
+
+How should the ADT data be incorporated into the analysis?
+While we have counts for both ADTs and transcripts, there are fundamental differences in nature of the data that make it difficult to treat the former as additional features in the latter.
+Most experiments involve only a small number of antibodies (<20) that are chosen by the researcher because they are of _a priori_ interest, in contrast to gene expression data that captures the entire transcriptome regardless of the study.
+The coverage of the ADTs is also much deeper as they are sequenced separately from the transcripts, allowing the sequencing resources to be concentrated into a smaller number of features.
+And, of course, the use of antibodies against protein targets involves consideration of separate biases compared to those observed for transcripts.
+
+In this chapter, we will describe some strategies for integrated analysis of ADT and transcript data in CITE-seq experiments.
+We will demonstrate using a PBMC dataset from 10X Genomics that contains quantified abundances for a number of interesting surface proteins.
+
+```{r}
+# Caching it locally with BiocFileCache to avoid repeating the download.
+library(BiocFileCache)
+bfc <- BiocFileCache(ask=FALSE)
+stuff <- bfcrpath(bfc, file.path("http://cf.10xgenomics.com",
+    "samples/cell-exp/3.0.0/pbmc_10k_protein_v3",
+    "pbmc_10k_protein_v3_filtered_feature_bc_matrix.tar.gz"))
+untar(stuff, exdir=tempdir())
+
+# Loading it in as a SingleCellExperiment object.
+library(DropletUtils)
+sce <- read10xCounts(file.path(tempdir(), "filtered_feature_bc_matrix"))
+sce
+```
+
+## Preprocessing 
+
+### Setting up the data
+
+The `SingleCellExperiment` class provides the concept of an "alternative Experiment" to store data for different sets of features but the same cells.
+This involves storing another `SummarizedExperiment` (or an instance of a subclass) _inside_ our `SingleCellExperiment` where the rows (features) can differ but the columns (cells) are the same.
+In previous chapters, we were using the alternative Experiments to store spike-in data, but here we will use the concept to split off the ADT data.
+This isolates the two sets of features to ensure that analyses on one set do not inadvertently use data from the other set, and vice versa.
+
+```{r}
+sce <- splitAltExps(sce, rowData(sce)$Type)
+altExpNames(sce)
+altExp(sce) # Can be used like any other SingleCellExperiment. 
+```
+
+At this point, it is also helpful to coerce the sparse matrix for ADTs into a dense matrix.
+The ADT counts are usually not sparse so storage as a sparse matrix provides no advantage; in fact, it actually increases memory usage and computational time as the indices of non-zero entries must be unnecessarily stored and processed.
+From a practical perspective, this avoids unnecessary incompatibilities with downstream applications that do not accept sparse inputs.
+
+```{r}
+counts(altExp(sce)) <- as.matrix(counts(altExp(sce)))
+counts(altExp(sce))[,1:10] # sneak peek
+```
+
+### Quality control
+
+For most part, our quality control for this dataset still depends on the endogenous transcripts to remove empty droplets and low-quality cells.
+Any failure in cDNA capture for a particular cell will affect the coverage of both transcripts and ADTs, and changes in mitochondrial RNA content are only reflected in the transcriptomic data; as a result, the ADTs provide little additional information for QC.
+For this dataset, the count matrix has already been filtered in _CellRanger_ to remove empty droplets so we only filter on the mitochondrial proportions to remove putative low-quality cells.
+
+```{r}
+library(scater)
+mito <- grep("^MT-", rowData(sce)$Symbol)
+df <- perCellQCMetrics(sce, subsets=list(Mito=mito))
+mito.discard <- isOutlier(df$subsets_Mito_percent, type="higher")
+summary(mito.discard)
+```
+
+If we want to combine transcript and ADT data, it is prudent to ensure that we only retain cells that actually have ADT counts.
+Recall that droplet-based libraries will contain contamination from ambient solution (Section \@ref(qc-droplets)), in this case containing containing conjugated antibodies that are either free in solution or bound to cell fragments.
+As the ADTs are (relatively) deeply sequenced, we can expect non-zero counts for most ADTs in each cell due to contamination (Figure \@ref(fig:detected-ab-hist); if this is not the case, we may suspect some failure of ADT processing for that cell.
+We thus remove cells that have unusually low numbers of detected ADTs, defined here as half of the median across all cells.
+(We could use the MAD-based default behavior of `isOutlier()`, but the MAD is zero in this case and filtering would discard useful cells with almost all ADTs detected.)
+
+```{r detected-ab-hist, fig.cap="Distribution of the number of detected ADTs across all cells in the PBMC dataset. The red dotted line indicates the threshold below which cells were removed."}
+# Require a minimum fold-change of 2 from the median (converted into log2).
+ab.discard <- isOutlier(df$`altexps_Antibody Capture_detected`,
+    log=TRUE, type="lower", min_diff=1)
+summary(ab.discard)
+
+hist(df$`altexps_Antibody Capture_detected`, col='grey', 
+    main="", xlab="Number of detected ADTs")
+abline(v=attr(ab.discard, "thresholds")["lower"], col="red", lty=2)
+```
+
+By comparison, the total ADT count is less useful as a QC metric because it is heavily correlated with the biological state of the cell.
+The presence of a targeted protein can lead to a several-fold increase in the total ADT count given the binary nature of most surface protein markers.
+Removing cells with low total ADTs would strongly penalize cell types that do not exhibit many (or any) of the selected protein targets, and would represent an extreme case of the issues discussed in Section \@ref(outlier-assumptions).
+
+Finally, to remove the low-quality cells, we subset the `SingleCellExperiment` as previously described.
+This automatically applies the filtering to both the transcript and ADT data; such coordination is one of the advantages of storing both datasets in a single object.
+
+```{r}
+discard <- ab.discard | mito.discard
+sce <- sce[,!discard]
+```
+
+### Normalization
+
+Counts for the ADTs are subject to several biases that must be normalized prior to further analysis.
+Capture efficiency varies from cell to cell though the differences in biophysical properties between endogenous transcripts and the (much shorter) ADTs means that the capture-related biases for the two sets of features are unlikely to be identical.
+Composition biases are also much more pronounced in ADT data due to (i) the binary nature of target protein abundances, where any increase in protein abundance manifests as a large increase to the total tag count; and (ii) the _a priori_ selection of interesting protein targets, which enriches for features that are more likely to be differentially abundant across the population.
+As in Chapter \@ref(normalization), we assume that these are scaling biases and compute ADT-specific size factors to remove them.
+To this end, several strategies are again available to calculate a size factor for each cell:
+
+1. The simplest approach is to normalize on the total ADT counts, effectively the library size for the ADTs.
+Like in Section \@ref(library-size-normalization), these "ADT library size factors" are adequate for clustering but will introduce composition biases that interfere with interpretation of the fold-changes between clusters.
+While composition biases are unlikely to compromise exploratory analyses like clustering, they may complicate interpretation of log-fold changes between clusters, especially for relatively subtle (e.g., ~2-fold) changes in the abundances of markers associated with functional activity rather than cell type.
+
+    ```{r}
+    sf.lib <- librarySizeFactors(altExp(sce))
+    summary(sf.lib)
+    ```
+
+    If we interpret the total count as the arithmetic mean of counts in each cell, we might instead consider the related approach of taking the geometric mean of all counts as the size factor for each cell [@stoeckius2017simultaneous].
+    The geometric mean is a reasonable estimator of the scaling biases for large counts with the added benefit that it mitigates the effects of composition biases by dampening the effects of one or two highly abundant proteins.
+    While more robust than the ADT library size factors, these geometric mean-based factors are still not entirely correct and will progressively become less accurate as upregulation increases in strength.
+
+    ```{r}
+    library(scuttle)
+    sf.geo <- geometricSizeFactors(altExp(sce))
+    summary(sf.geo)
+    ```
+
+2. Ideally, we would like to compute size factors that adjust for the composition biases.
+This usually requires an assumption that most ADTs are not differentially expressed between cell types/states.
+At first glance, this appears to be a strong assumption - the target proteins were specifically chosen as they exhibit interesting heterogeneity across the population, meaning that a non-differential majority across ADTs would be unlikely.
+However, we can still make it work by assuming that (i) each cell only expresses a minority of the targeted proteins and (ii) the ambient contamination in each library is the same in terms of the number of molecules captured by each droplet.
+We can then compute size factors to equalize the coverage of these contaminating ADTs, thus eliminating cell-to-cell differences in capture efficiency.
+This is loosely based on a similar approach for normalization of ChIP-seq data based on background enrichment [@lun2016csaw].
+
+    If possible, we would prefer to obtain an estimate of the ambient profile from the barcodes that were identified as empty droplets (Section \@ref(qc-droplets)).
+    In this case, though, this information has already been discarded from the provided dataset; we instead use a proxy profile constructed from the average of all cells, under the assumption that all cell types are equally likely to contribute to the ambient profile.
+    We define size factors using a `r Biocpkg("DESeq")`-like approach based on the median of the ratio of each cell's counts to the ambient profile.
+
+    ```{r}
+    # Replace 'ambient' with actual ambient profile, if available.
+    ambient <- rowMeans(counts(altExp(sce)))
+    sf.amb <- medianSizeFactors(altExp(sce), reference=ambient)
+    summary(sf.amb)
+    ```
+
+    In one subpopulation, the DESeq-like size factors are consistently larger than the ADT library size factors, whereas the opposite is true for most of the other subpopulations (Figure \@ref(fig:comp-bias-norm)).
+    This is consistent with the presence of composition biases due to differential abundance of the targeted proteins between subpopulations.
+    Here, composition biases would introduce a spurious 2-fold change in normalized ADT abundance if the library size factors were used.
+
+    ```{r comp-bias-norm, fig.cap="DESeq-like size factors for each cell in the PBMC dataset, compared to ADT library size factors. Each point is a cell and is colored according to the cluster identity defined from normalized ADT data."}
+    # Coloring by cluster to highlight the composition biases.
+    # We set k=20 to get fewer, broader clusters for a clearer picture.
+    library(scran)
+    tagdata <- logNormCounts(altExp(sce)) # library size factors by default.
+    g <- buildSNNGraph(tagdata, k=20, d=NA) # no need for PCA, see below.
+    clusters <- igraph::cluster_walktrap(g)$membership
+
+    plot(sf.lib, sf.amb, log="xy", col=clusters, 
+        xlab="Library size factors (tag)",
+        ylab="DESeq-like size factors (tag)")
+    abline(0, 1, col="grey", lty=2)
+    ```
+
+    ```{r, echo=FALSE, results="hide"}
+    # Checking my trash talk.
+    by.clust <- split(log2(sf.lib/sf.amb), clusters)
+    med.clust <- vapply(by.clust, median, 0)
+    stopifnot(diff(range(med.clust)) > 1)
+    ```
+
+3. Some experiments will include isotype control antibodies that have similar properties to a primary antibody but lack a specific target in the cell, thus providing a measure of non-specific binding.
+As with spike-in normalization (Section \@ref(spike-norm)), we could make the assumption that these control ADTs should not be differentially abundant between cells. 
+Any difference thus represents some bias that should be normalized by defining control-based size factors from the sum of counts over all control ADTs.
+We demonstrate this approach below by computing size factors from the immunoglobulin (IgG) controls (Figure \@ref(fig:control-bias-norm)).
+
+    ```{r control-bias-norm, fig.cap="IgG control-derived size factors for each cell in the PBMC dataset, compared to the DESeq-like size factors."}
+    controls <- grep("^Ig", rownames(altExp(sce)))
+    sf.control <- librarySizeFactors(altExp(sce), subset_row=controls) 
+    summary(sf.control)
+
+    plot(sf.amb, sf.control, log="xy", 
+        xlab="DESeq-like size factors (tag)",
+        ylab="Control size factors (tag)")
+    abline(0, 1, col="grey", lty=2)
+    ```
+
+    This approach exchanges the previous assumption of a non-differential majority for another assumption about the lack of differential abundance in the control tags.
+    We might feel that the latter is a generally weaker assumption, but it is possible for non-specific binding to vary due to biology (e.g., when the cell surface area increases), at which point this normalization strategy may not be appropriate.
+   
+We suggest using the DESeq-like size factors by default, as these are the most general and eliminate the major problems with composition biases.
+Running `logNormCounts()` will then perform scaling normalization and log-transformation for both the endogenous transcripts and the ADTs using their respective size factors.
+
+```{r}
+sizeFactors(altExp(sce)) <- sf.amb
+sce <- logNormCounts(sce, use_altexps=TRUE)
+
+# Checking that we have normalized values:
+assayNames(sce)
+assayNames(altExp(sce))
+```
+
+## Clustering and interpretation
+
+Unlike transcript-based counts, feature selection is largely unnecessary for analyzing ADT data.
+This is because feature selection has already occurred during experimental design where the manual choice of target proteins means that all ADTs correspond to interesting features by definition.
+From a practical perspective, the ADT count matrix is already small so there is no need for data compaction from using HVGs or PCs.
+Moreover, each ADT is often chosen to capture some orthogonal biological signal, so there is not much extraneous noise in higher dimensions that can be readily removed.
+This suggests we should directly apply downstream procedures like clustering and visualization on the log-normalized abundance matrix for the ADTs (Figure \@ref(fig:tsne-tags)).
+
+```{r tsne-tags, fig.cap="$t$-SNE plot generated from the log-normalized abundance of each ADT in the PBMC dataset. Each point is a cell and is labelled according to its assigned cluster."}
+# Set d=NA so that the function does not perform PCA.
+g.adt <- buildSNNGraph(altExp(sce), d=NA) 
+clusters.adt <- igraph::cluster_walktrap(g.adt)$membership
+
+# Generating a t-SNE plot.
+set.seed(1010010)
+altExp(sce) <- runTSNE(altExp(sce))
+colLabels(altExp(sce)) <- factor(clusters.adt)
+plotTSNE(altExp(sce), colour_by="label", text_by="label", text_col="red")
+```
+
+With only a few ADTs, characterization of each cluster is most efficiently achieved by creating a heatmap of the average log-abundance of each tag (Figure \@ref(fig:heat-tags)).
+For this experiment, we can easily identify B cells (CD19^+^), various subsets of T cells (CD3^+^, CD4^+^, CD8^+^), monocytes and macrophages (CD14^+^, CD16^+^), to name a few.
+More detailed examination of the distribution of abundances within each cluster is easily performed with `plotExpression()` where strong bimodality may indicate that finer clustering is required to resolve cell subtypes.
+
+```{r heat-tags, fig.cap="Heatmap of the average log-normalized abundance of each ADT in each cluster of the PBMC dataset. Colors represent the log~2~-fold change from the grand average across all clusters."}
+se.averaged <- sumCountsAcrossCells(altExp(sce), clusters.adt,
+    exprs_values="logcounts", average=TRUE)
+
+library(pheatmap)
+averaged <- assay(se.averaged)
+pheatmap(averaged - rowMeans(averaged),
+    breaks=seq(-3, 3, length.out=101))
+```
+
+Of course, this provides little information beyond what we could have obtained from a mass cytometry experiment; the real value of this data lies in the integration of protein abundance with gene expression.
+
+## Integration with gene expression data
+
+### By subclustering
+
+In the simplest approach to integration, we take cells in each of the ADT-derived clusters and perform subclustering using the transcript data.
+This is an _in silico_ equivalent to an experiment that performs FACS to isolate cell types followed by scRNA-seq for further characterization.
+We exploit the fact that the ADT abundances are cleaner (larger counts, stronger signal) for more robust identification of broad cell types, and use the gene expression data to identify more subtle structure that manifests in the transcriptome. 
+We demonstrate below by using `quickSubCluster()` to loop over all of the ADT-derived clusters and subcluster on gene expression (Figure \@ref(fig:subcluster-stats)).
+
+```{r subcluster-stats, fig.cap="Number of subclusters identified from the gene expression data within each ADT-derived parent cluster."}
+set.seed(101010)
+all.sce <- quickSubCluster(sce, clusters.adt,
+    prepFUN=function(x) {
+        dec <- modelGeneVar(x)
+        top <- getTopHVGs(dec, prop=0.1)
+        x <- runPCA(x, subset_row=top, ncomponents=25)
+    },
+    clusterFUN=function(x) {
+        g.trans <- buildSNNGraph(x, use.dimred="PCA")
+        igraph::cluster_walktrap(g.trans)$membership
+    }
+)
+
+# Summarizing the number of subclusters in each tag-derived parent cluster,
+# compared to the number of cells in that parent cluster.
+ncells <- vapply(all.sce, ncol, 0L)
+nsubclusters <- vapply(all.sce, FUN=function(x) length(unique(x$subcluster)), 0L)
+plot(ncells, nsubclusters, xlab="Number of cells", type="n",
+    ylab="Number of subclusters", log="xy")
+text(ncells, nsubclusters, names(all.sce))
+```
+
+```{r, echo=FALSE}
+# Checking that there is a strong positive correlation.
+stopifnot(cor(log(ncells), log(nsubclusters))> 0.5)
+```
+
+```{r, echo=FALSE}
+chosen.cluster <- "12"
+```
+
+Another benefit of subclustering is that we can use the annotation on the ADT-derived clusters to facilitate annotation of each subcluster.
+If we knew that cluster `X` contained T cells from the ADT-derived data, there is no need to identify subclusters `X.1`, `X.2`, etc. as T cells from scratch; rather, we can focus on the more subtle (and interesting) differences between the subclusters using `findMarkers()`.
+For example, cluster `r chosen.cluster` contains CD8^+^ T cells according to Figure \@ref(fig:heat-tags), in which we further identify internal subclusters based on granzyme expression (Figure \@ref(fig:gzmh-cd8-t)).
+Subclustering is also conceptually appealing as it avoids comparing log-fold changes in protein abundances with log-fold changes in gene expression.
+This ensures that variation (or noise) from the transcript counts does not compromise cell type/state identification from the relatively cleaner ADT counts.
+
+```{r gzmh-cd8-t, fig.wide=TRUE, fig.asp=0.5, fig.cap="Distribution of log-normalized expression values of _GZMH_ (left) and _GZHK_ (right) in transcript-derived subclusters of a ADT-derived subpopulation of CD8^+^ T cells."}
+of.interest <- "12"
+plotExpression(all.sce[[of.interest]], x="subcluster",
+    features=c("ENSG00000100450", "ENSG00000113088"))
+```
+
+```{r, echo=FALSE}
+stopifnot(identical(of.interest, chosen.cluster))
+stopifnot(averaged["CD3",of.interest] > 10)
+stopifnot(averaged["CD8a",of.interest] > 10)
+
+cur.sce <- all.sce[[chosen.cluster]]
+cur.markers <- findMarkers(cur.sce, cur.sce$subcluster, direction="up")
+stopifnot(length(cur.markers)==2L)
+stopifnot("ENSG00000100450" %in% rownames(cur.markers[[1]])[1:10])
+stopifnot("ENSG00000113088" %in% rownames(cur.markers[[2]])[1:10])
+```
+
+The downside is that relying on previous results increases the risk of misleading conclusions when ambiguities in those results are not considered, as previously discussed in Section \@ref(subclustering).
+It is a good idea to perform some additional checks to ensure that each subcluster has similar protein abundances, e.g., using a heatmap as in Figure \@ref(fig:heat-tags) or with a series of plots like in Figure \@ref(fig:subcluster-tag-dist).
+If so, this allows the subcluster to "inherit" the annotation attached to the parent cluster for easier interpretation.
+
+```{r subcluster-tag-dist, fig.asp=0.5, fig.wide=TRUE, fig.cap="Distribution of log-normalized abundances of ADTs for CD3 and CD8a in each subcluster of the CD8^+^ T cell population."}
+sce.cd8 <- all.sce[[of.interest]]
+plotExpression(altExp(sce.cd8), x=I(sce.cd8$subcluster),
+    features=c("CD3", "CD8a"))
+```
+
+### By combined clustering
+
+Alternatively, we can combine the information from both sets of features into a single matrix for use in downstream analyses.
+This is logistically convenient as the combined structure is compatible with routine analysis workflows for transcript-only data.
+To illustrate, we first perform some standard steps on the transcript count matrix:
+
+```{r}
+sce.main <- logNormCounts(sce)
+dec.main <- modelGeneVar(sce.main)
+top.main <- getTopHVGs(dec.main, prop=0.1)
+sce.main <- runPCA(sce.main, subset_row=top.main, ncomponents=25)
+```
+
+The simplest version of this idea involves literally combining the log-normalized abundance matrix for the ADTs with the log-expression matrix (or its compacted form, the matrix of PCs) to obtain a single matrix for use in downstream procedures.
+This requires some reweighting to balance the contribution of the transcript and ADT data to the total variance in the combined matrix, especially given that the former has around 100-fold more features than the latter.
+We see that the number of clusters is slightly higher than that from the ADT data alone, consistent with the introduction of additional heterogeneity when the two feature sets are combined.
+
+```{r}
+# TODO: push this into a function somewhere.
+library(DelayedMatrixStats)
+transcript.data <- logcounts(sce.main)[top.main,,drop=FALSE]
+transcript.var <- sum(rowVars(DelayedArray(transcript.data)))
+tag.data <- logcounts(altExp(sce.main))
+tag.var <- sum(rowVars(DelayedArray(tag.data)))
+
+reweight <- sqrt(transcript.var/tag.var)
+combined <- rbind(transcript.data, tag.data*reweight)
+
+# 'buildSNNGraph' conveniently performs the PCA for us if requested. We use
+# more PCs in 'd' to capture more variance in both sets of features. Note that
+# this uses IRLBA by default so we need to set the seed.
+set.seed(100010)
+g.com <- buildSNNGraph(combined, d=50) 
+clusters.com <- igraph::cluster_walktrap(g.com)$membership
+table(clusters.com)
+```
+
+```{r, echo=FALSE}
+# Checking that resolution is indeed higher.
+stopifnot(length(unique(clusters.com)) > length(unique(colLabels(altExp(sce)))))
+```
+
+A more sophisticated approach uses the UMAP algorithm [@mcInnes2018umap] to integrate information from the two sets of features.
+Very loosely speaking, we can imagine this as an intersection of the nearest neighbor graphs formed from each set, which effectively encourages the formation of communities of cells that are close in both feature spaces.
+Here, we perform two rounds of UMAP; one round retains high dimensionality for a faithful representation of the data during clustering, while the other performs dimensionality reduction for a pretty visualization.
+This yields an extremely fine-grained clustering in Figure \@ref(fig:combined-umap), which is attributable to the stringency of intersection operations for defining the local neighborhood.
+
+```{r combined-umap, fig.cap="UMAP plot obtained by combining transcript and ADT data in the PBMC dataset. Each point represents a cell and is colored according to its assigned cluster."}
+# See https://umap-learn.readthedocs.io/en/latest/clustering.html
+# for the choice of umap parameters.
+set.seed(1001010)
+combined2 <- runMultiUMAP(
+    list(reducedDim(sce.main, "PCA"), 
+        t(logcounts(altExp(sce.main)))),
+    n_components=20, n_neighbors=30, min_dist=0
+)
+
+g.com2 <- buildSNNGraph(combined2, d=NA, transposed=TRUE)
+clusters.com2 <- igraph::cluster_walktrap(g.com2)$membership
+table(clusters.com2)
+
+# Combining again for visualization:
+set.seed(0101110)
+reducedDim(sce.main, "combinedUMAP") <- runMultiUMAP(
+    list(reducedDim(sce.main, "PCA"), 
+        t(logcounts(altExp(sce.main))))
+)
+colLabels(sce.main) <- clusters.com2
+plotReducedDim(sce.main, "combinedUMAP", 
+    colour_by="label", text_by="label")
+```
+
+```{r, echo=FALSE}
+# Checking that resolution is indeed higher.
+stopifnot(length(unique(clusters.com2)) > length(unique(clusters.com)))
+stopifnot(length(unique(clusters.com2)) > length(unique(clusters.adt)))
+```
+
+An even more sophisticated approach uses factor analysis to identify common and unique factors of variation in each feature set.
+The set of factors can then be used as low-dimensional coordinates for each cell in downstream analyses, though a number of additional statistics are also computed that may be useful, e.g., the contribution of each feature to each factor.
+
+```{r}
+# Waiting for MOFA2. If you see Godot, remind him that he owes me money.
+```
+
+These combined strategies are convenient but do not consider (or implicitly make assumptions about) the importance of heterogeneity in the ADT data relative to the transcript data.
+For example, the UMAP approach takes equal contributions from both sets of features to the intersection, which may not be appropriate if the biology of interest is concentrated in only one set.
+More generally, a combined analysis must consider the potential for uninteresting noise in one set to interfere with biological signal in the other set, a concern that is largely avoided during subclustering.
+
+### By differential testing 
+
+In more interesting applications of this technology, protein targets are chosen that reflect some functional activity rather than cell type.
+(Because, frankly, the latter is not particularly hard to infer from transcript data in most cases.)
+A particularly elegant example involves quantification of the immune response by using antibodies to target the influenza peptide-MHCII complexes in T cells, albeit for mass cytometry [@fehlings2018multiplex].
+If the aim is to test for differences in the functional readout, a natural analysis strategy is to use the transcript data for clustering (Figure \@ref(fig:tsne-naive)) and perform differential testing between clusters or conditions for the relevant ADTs.
+
+```{r tsne-naive, fig.cap="$t$-SNE plot of the PBMC dataset based on the transcript data. Each point is a cell and is colored according to the assigned cluster."}
+# Performing a quick analysis of the gene expression data.
+sce <- logNormCounts(sce)
+dec <- modelGeneVar(sce)
+top <- getTopHVGs(dec, prop=0.1)
+
+set.seed(1001010)
+sce <- runPCA(sce, subset_row=top, ncomponents=25)
+
+g <- buildSNNGraph(sce, use.dimred="PCA")
+clusters <- igraph::cluster_walktrap(g)$membership
+colLabels(sce) <- factor(clusters)
+
+set.seed(1000010)
+sce <- runTSNE(sce, dimred="PCA")
+plotTSNE(sce, colour_by="label", text_by="label")
+```
+
+```{r, echo=FALSE}
+chosen.cluster <- 16
+```
+
+We demonstrate this approach using `findMarkers()` to test for differences in tag abundance between clusters (Chapter \@ref(marker-detection)).
+For example, if the PD-1 level was a readout for some interesting phenotype - say, T cell exhaustion [@pauken2015overcoming] - we might be interested in its upregulation in cluster `r chosen.cluster` compared to all other clustuers (Figure \@ref(fig:heat-pd-1)).
+Methods from Chapter \@ref(multi-sample-comparisons) can be similarly used to test for differences between conditions based on pseudo-bulk ADT counts.
+
+```{r heat-pd-1, fig.cap=sprintf("Heatmap of log-fold changes in tag abundances in cluster %s compared to all other clusters identified from transcript data in the PBMC data set.", chosen.cluster)}
+markers <- findMarkers(altExp(sce), colLabels(sce))
+of.interest <- markers[[16]]
+pheatmap(getMarkerEffects(of.interest), breaks=seq(-3, 3, length.out=101))
+```
+
+```{r, echo=FALSE, results="hide"}
+stopifnot(identical(markers[[chosen.cluster]], of.interest))
+stopifnot(all(getMarkerEffects(of.interest["PD-1",]) > 1))
+```
+
+The main appeal of this approach is that it avoids data snooping (Section \@ref(from-data-snooping)) as the clusters are defined without knowledge of the ADTs.
+This improves the statistical rigor of the subsequent differential testing on the ADT abundances (though only to some extent; other problems are still present, such as the lack of true replication in between-cluster comparisons). 
+From a practical perspective, this approach yields fewer clusters and reduces the amount of work involved in manual annotation, especially if there are multiple functional states (e.g., stressed, apoptotic, stimulated) for each cell type.
+However, it is fundamentally limited to per-tag inferences; if we want to identify subpopulations with interesting combinations of target proteins, we must resort to high-dimensional analyses like clustering on the ADT abundances.
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+``` 

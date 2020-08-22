@@ -1,0 +1,769 @@
+---
+output:
+  html_document
+bibliography: ref.bib
+---
+
+# Trajectory Analysis
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+## Overview
+
+Many biological processes manifest as a continuum of dynamic changes in the cellular state.
+The most obvious example is that of differentiation into increasingly specialized cell subtypes, but we might also consider phenomena like the cell cycle or immune cell activation that are accompanied by gradual changes in the cell's transcriptome.
+We characterize these processes from single-cell expression data by identifying a "trajectory", i.e., a path through the high-dimensional expression space that traverses the various cellular states associated with a continuous process like differentiation.
+In the simplest case, a trajectory will be a simple path from one point to another,
+but we can also observe more complex trajectories that branch to multiple endpoints.
+
+The "pseudotime" is defined as the positioning of cells along the trajectory that quantifies the relative activity or progression of the underlying biological process.
+For example, the pseudotime for a differentiation trajectory might represent the degree of differentiation from a pluripotent cell to a terminal state where cells with larger pseudotime values are more differentiated.
+This metric allows us to tackle questions related to the global population structure in a more quantitative manner.
+The most common application is to fit models to gene expression against the pseudotime to identify the genes responsible for generating the trajectory in the first place, especially around interesting branch events.
+
+In this section, we will demonstrate several different approaches to trajectory analysis using the haematopoietic stem cell (HSC) dataset from @nestorowa2016singlecell.
+
+```{r, results='asis', echo=FALSE}
+extractCached("nestorowa-hsc.Rmd", "clustering", "sce.nest")
+```
+
+```{r}
+sce.nest
+```
+
+## Obtaining pseudotime orderings
+
+### Overview
+
+The pseudotime is simply a number describing the relative position of a cell in the trajectory,
+where cells with larger values are consider to be "after" their counterparts with smaller values.
+Branched trajectories will typically be associated with multiple pseudotimes, one per path through the trajectory;
+these values are not usually comparable across paths.
+It is worth noting that "pseudotime" is a rather unfortunate term as it may not have much to do with real-life time.
+For example, one can imagine a continuum of stress states where cells move in either direction (or not) over time
+but the pseudotime simply describes the transition from one end of the continuum to the other.
+In trajectories describing time-dependent processes like differentiation, a cell's pseudotime value may be used as a proxy for its relative age, but only if directionality can be inferred (see Section \@ref(finding-the-root)).
+
+The big question is how to identify the trajectory from high-dimensional expression data and map individual cells onto it.
+A massive variety of different algorithms are available for doing so [@sealens2019comparison], and while we will demonstrate only a few specific methods below, many of the concepts apply generally to all trajectory inference strategies.
+A more philosophical question is whether a trajectory even exists in the dataset.
+One can intepret a continuum of states as a series of closely related (but distinct) subpopulations, or two well-separated clusters as the endpoints of a trajectory with rare intermediates.
+The choice between these two perspectives is left to the analyst based on which is more useful, convenient or biologically sensible.
+
+### Cluster-based minimum spanning tree
+
+The `r Biocpkg("TSCAN")` algorithm uses a simple yet effective approach to trajectory reconstruction.
+It uses the clustering to summarize the data into a smaller set of discrete units, computes cluster centroids by averaging the coordinates of its member cells, and then forms the minimum spanning tree (MST) across those centroids.
+The MST is simply an undirected acyclic graph that passes through each centroid exactly once and can be thought of as the most parsimonious structure that captures the transitions between clusters.
+We demonstrate below on the Nestorowa dataset, computing the cluster centroids in the low-dimensional PC space to take advantage of data compaction and denoising (Chapter \@ref(dimensionality-reduction)).
+
+```{r}
+library(scater)
+by.cluster <- aggregateAcrossCells(sce.nest, ids=colLabels(sce.nest))
+centroids <- reducedDim(by.cluster, "PCA")
+
+# Using an implementation of the TSCAN algorithm in scran:
+library(scran)
+mst <- createClusterMST(centroids)
+mst
+```
+
+For reference, we can draw the same lines between the centroids in a $t$-SNE plot (Figure \@ref(fig:tscan-nest-tsne)).
+This allows us to identify interesting clusters such as those at bifurcations or endpoints.
+Note that the MST is generated from distances in the PC space and is merely being visualized in the $t$-SNE space,
+for the same reasons as discussed in Section \@ref(visualization-interpretation);
+this may occasionally result in some visually unappealing plots if the original ordering of clusters is not preserved in the plot.
+
+```{r tscan-nest-tsne, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its cluster assignment. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
+line.data <- connectClusterMST(reducedDim(by.cluster, "TSNE"), mst=mst)
+plotTSNE(sce.nest, colour_by="label") + 
+    geom_line(data=line.data, mapping=aes(x=dim1, y=dim2, group=edge))
+```
+
+We obtain a pseudotime ordering by projecting the cells onto the MST with `orderClusterMST()`.
+More specifically, we move each cell onto the closest edge of the MST;
+the pseudotime is then calculated as the distance along the MST to this new position from a "root node".
+For our purposes, we will arbitrarily pick one of the endpoint nodes as the root,
+though a more careful choice based on the biological annotation of each node may yield more relevant orderings
+(e.g., picking a node corresponding to a more pluripotent state).
+Here, multiple sets of pseudotimes are reported for a branched trajectory where each ordering corresponds 
+to one path from the root node to one of the terminal nodes.
+
+```{r tscan-nest-pseudo, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
+tscan.pseudo <- orderClusterMST(reducedDim(sce.nest, "PCA"), 
+    ids=colLabels(sce.nest), centers=centroids, mst=mst)
+head(tscan.pseudo)
+
+# Taking the rowMeans just gives us a single pseudo-time for all cells. Cells
+# in segments that are shared across paths have the same pseudo-time value for
+# those paths anyway, so the rowMeans doesn't change anything.
+common.pseudo <- rowMeans(tscan.pseudo, na.rm=TRUE)
+plotTSNE(sce.nest, colour_by=I(common.pseudo), 
+        text_by="label", text_colour="red") +
+    geom_line(data=line.data, mapping=aes(x=dim1, y=dim2, group=edge))
+```
+
+```{r, echo=FALSE, results="hide"}
+stopifnot(ncol(tscan.pseudo) > 1L)
+```
+
+Alternatively, this entire series of calculations can be conveniently performed with the `quickPseudotime()` wrapper.
+This executes all steps from `aggregateAcrossCells()` to `orderClusterMST()` and returns a list with the output from each step.
+
+```{r}
+pseudo.all <- quickPseudotime(sce.nest, use="PCA")
+head(pseudo.all$ordering)
+```
+
+The MST can also be constructed with an "outgroup" to avoid connecting unrelated populations in the dataset.
+Based on the OMEGA cluster concept from @street2018slingshot,
+the outgroup is an artificial cluster that is equidistant from all real clusters at some threshold value.
+If the original MST _sans_ the outgroup contains an edge that is longer than twice the threshold,
+the MST computed with the edge will instead be routed through the outgroup.
+We can subsequently break up the MST into subcomponents (i.e., a minimum spanning forest) by removing the outgroup.
+We set `outgroup=TRUE` to introduce an outgroup with an automatically determined threwshold distance,
+which breaks off up our previous MST into two components (Figure \@ref(fig:tscan-nest-omega)).
+
+```{r tscan-nest-omega, fig.cap="Minimum spanning tree of the Nestorowa clusters after introducing an outgroup."}
+pseudo.og <- quickPseudotime(sce.nest, use="PCA", outgroup=TRUE)
+set.seed(10101)
+plot(pseudo.og$mst)
+```
+
+```{r, echo=FALSE}
+stopifnot(length(igraph::components(pseudo.og$mst)) > 1)
+```
+
+The `r Biocpkg("TSCAN")` approach derives several advantages from using clusters to form the MST.
+The most obvious is that of computational speed as calculations are performed over clusters rather than cells.
+The relative coarseness of clusters protects against the per-cell noise that would otherwise reduce the stability of the MST.
+The interpretation of the MST is also straightforward as it uses the same clusters as the rest of the analysis,
+allowing us to recycle previous knowledge about the biological annotations assigned to each cluster.
+
+However, the reliance on clustering is a double-edged sword.
+If the clusters are not sufficiently granular, 
+it is possible for `r Biocpkg("TSCAN")` to overlook variation that occurs inside a single cluster.
+The MST is obliged to pass through each cluster exactly once, which can lead to excessively circuitous paths in overclustered datasets as well as the formation of irrelevant paths between distinct cell subpopulations.
+The MST also fails to handle more complex events such as "bubbles" (i.e., a bifurcation and then a merging) or cycles.
+
+### Principal curves
+
+To identify a trajectory, one might imagine simply "fitting" a one-dimensional curve 
+so that it passes through the cloud of cells in the high-dimensional expression space.
+This is the idea behind principal curves [@hastie1989principal], 
+effectively a non-linear generalization of PCA where the axes of most variation are allowed to bend.
+We use the `r Biocpkg("slingshot")` package [@street2018slingshot] to fit a single principal curve to the Nestorowa dataset,
+again using the low-dimensional PC coordinates for denoising and speed.
+This yields a pseudotime ordering of cells based on their relative positions when projected onto the curve.
+
+```{r}
+library(slingshot)
+sce.sling <- slingshot(sce.nest, reducedDim='PCA')
+head(sce.sling$slingPseudotime_1)
+```
+
+We can then visualize the path taken by the fitted curve in any desired space with `embedCurves()`.
+For example, Figure \@ref(fig:traj-princurve-tsne-nest) shows the behavior of the principle curve on the $t$-SNE plot.
+Again, users should note that this may not always yield aesthetically pleasing plots if the $t$-SNE algorithm decides to arrange clusters so that they no longer match the ordering of the pseudotimes.
+
+```{r traj-princurve-tsne-nest, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset where each point is a cell and is colored by the _slingshot_ pseudotime ordering. The fitted principal curve is shown in black."}
+embedded <- embedCurves(sce.sling, "TSNE")
+embedded <- slingCurves(embedded)[[1]] # only 1 path.
+embedded <- data.frame(embedded$s[embedded$ord,])
+
+plotTSNE(sce.sling, colour_by="slingPseudotime_1") +
+    geom_path(data=embedded, aes(x=Dim.1, y=Dim.2), size=1.2)
+```
+
+The previous call to `slingshot()` assumed that all cells in the dataset were part of a single curve.
+To accommodate more complex events like bifurcations, we use our previously computed cluster assignments to build a rough sketch for the global structure in the form of a MST across the cluster centroids.
+Each path through the MST from a designated root node is treated as a lineage that contains cells from the associated clusters.
+Principal curves are then simultaneously fitted to all lineages with some averaging across curves to encourage consistency in shared clusters across lineages.
+This process yields a matrix of pseudotimes where each column corresponds to a lineage and contains the pseudotimes of all cells assigned to that lineage.
+
+```{r}
+sce.sling2 <- slingshot(sce.nest, cluster=colLabels(sce.nest), reducedDim='PCA')
+pseudo.paths <- slingPseudotime(sce.sling2)
+head(pseudo.paths)
+```
+
+By using the MST as a scaffold for the global structure, `slingshot()` can accommodate branching events based on divergence in the principal curves (Figure \@ref(fig:traj-princurve-clustered-nest)).
+However, unlike `r Biocpkg("TSCAN")`, the MST here is only used as a rough guide and does not define the final pseudotime.
+
+```{r traj-princurve-clustered-nest, fig.cap="UMAP plot of the Nestorowa HSC dataset where each point is a cell and is colored by the average _slingshot_ pseudotime across paths. The principal curves fitted to each lineage are shown in black."}
+sce.nest <- runUMAP(sce.nest, dimred="PCA")
+reducedDim(sce.sling2, "UMAP") <- reducedDim(sce.nest, "UMAP")
+shared.pseudo <- rowMeans(pseudo.paths, na.rm=TRUE)
+
+# Need to loop over the paths and add each one separately.
+gg <- plotUMAP(sce.sling2, colour_by=I(shared.pseudo))
+embedded <- embedCurves(sce.sling2, "UMAP")
+embedded <- slingCurves(embedded)
+for (path in embedded) {
+    embedded <- data.frame(path$s[path$ord,])
+    gg <- gg + geom_path(data=embedded, aes(x=Dim.1, y=Dim.2), size=1.2)
+}
+
+gg
+```
+
+We can use `slingshotBranchID()` to determine whether a particular cell is shared across multiple curves or is unique to a subset of curves (i.e., is located "after" branching).
+In this case, we can see that most cells jump directly from a global common segment (`1,2,3`) to one of the curves (`1`, `2`, `3`) without any further hierarchy, i.e., no noticeable internal branch points.
+
+```{r}
+curve.assignments <- slingBranchID(sce.sling2)
+table(curve.assignments)
+```
+
+```{r, echo=FALSE}
+# Sanity checks.
+tab <- table(curve.assignments)
+stopifnot(max(tab)==tab["1,2,3"])
+stopifnot(sum(tab[c("1,2,3", "1", "2","3")]) > 0.95)
+```
+
+For larger datasets, we can speed up the algorithm by approximating each principal curve with a fixed number of points.
+By default, `slingshot()` uses one point per cell to define the curve, which is unnecessarily precise when the number of cells is large.
+Applying an approximation with `approx_points=` reduces computational work without any major loss of precision in the pseudotime estimates.
+
+```{r}
+sce.sling3 <- slingshot(sce.nest, cluster=colLabels(sce.nest), 
+    reducedDim='PCA', approx_points=100)
+pseudo.paths3 <- slingPseudotime(sce.sling3)
+head(pseudo.paths3)
+```
+
+```{r, echo=FALSE}
+stopifnot(median(pseudo.paths3 - pseudo.paths, na.rm=TRUE) < 0.1)
+```
+
+The MST can also be constructed with an OMEGA cluster to avoid connecting unrelated trajectories.
+This operates in the same manner as (and was the inspiration for) the outgroup for `r Biocpkg("scran")`'s MST,
+Principal curves are fitted through each component individually, 
+manifesting in the pseudotime matrix as paths that do not share any cells.
+
+```{r traj-princurve-omag-nest, fig.cap="UMAP plot of the Nestorowa HSC dataset where each point is a cell and is colored by the average _slingshot_ pseudotime across paths. The principal curves (black lines) were constructed with an OMEGA cluster."}
+sce.sling4 <- slingshot(sce.nest, cluster=colLabels(sce.nest), 
+    reducedDim='PCA', approx_points=100, omega=TRUE)
+pseudo.paths4 <- slingPseudotime(sce.sling4)
+head(pseudo.paths4)
+
+shared.pseudo <- rowMeans(pseudo.paths, na.rm=TRUE)
+gg <- plotUMAP(sce.sling4, colour_by=I(shared.pseudo))
+embedded <- embedCurves(sce.sling4, "UMAP")
+embedded <- slingCurves(embedded)
+for (path in embedded) {
+    embedded <- data.frame(path$s[path$ord,])
+    gg <- gg + geom_path(data=embedded, aes(x=Dim.1, y=Dim.2), size=1.2)
+}
+gg
+```
+
+```{r, echo=FALSE}
+# Sanity check.
+stopifnot(all(is.na(pseudo.paths4[,1]) | is.na(pseudo.paths4[,3])))
+stopifnot(all(is.na(pseudo.paths4[,2]) | is.na(pseudo.paths4[,3])))
+```
+
+The use of principal curves adds an extra layer of sophistication that complements the deficiencies of the cluster-based MST.
+The principal curve has the opportunity to model variation within clusters that would otherwise be overlooked;
+for example, `r Biocpkg("slingshot")` could build a trajectory out of one cluster while a _TSCAN_-like algorithm cannot.
+Conversely, the principal curves can "smooth out" circuitous paths in the MST for overclustered data,
+ignoring small differences between fine clusters that are unlikely to be relevant to the overall trajectory.
+
+That said, the structure of the initial MST is still fundamentally dependent on the resolution of the clusters.
+One can arbitrarily change the number of branches from `r Biocpkg("slingshot")` by tuning the cluster granularity,
+making it difficult to use the output as evidence for the presence/absence of subtle branch events.
+If the variation within clusters is uninteresting, the greater sensitivity of the curve fitting to such variation may yield irrelevant trajectories where the differences between clusters are masked.
+Moreover, `r Biocpkg("slingshot")` is no longer obliged to separate clusters in pseudotime,
+which may complicate intepretation of the trajectory with respect to existing cluster annotations.
+
+## Characterizing trajectories
+
+### Overview
+
+Once we have constructed a trajectory, the next step is to characterize the underlying biology based on its DE genes.
+The aim here is to find the genes that exhibit significant changes in expression across pseudotime,
+as these are the most likely to have driven the formation of the trajectory in the first place.
+The overall strategy is to fit a model to the per-gene expression with respect to pseudotime,
+allowing us to obtain inferences about the significance of any association.
+We can then prioritize interesting genes as those with low $p$-values for further investigation.
+A diversity of options are available for model fitting but we will focus on the simplest strategy of fitting a linear model to the log-expression values with respect to the pseudotime; we will discuss some of the more advanced models later.
+
+### Changes along a trajectory
+
+To demonstrate, we will identify genes with significant changes with respect to one of the TSCAN pseudotimes in the Nestorowa data.
+We use the `testPseudotime()` utility to fit a natural spline to the expression of each gene,
+allowing us to model a range of non-linear relationships in the data.
+We then perform an analysis of variance (ANOVA) to determine if any of the spline coefficients are significantly non-zero,
+i.e., there is some significant trend with respect to pseudotime.
+
+```{r}
+library(scran)
+pseudo <- testPseudotime(sce.nest, pseudotime=tscan.pseudo[,1])
+pseudo$SYMBOL <- rowData(sce.nest)$SYMBOL
+pseudo[order(pseudo$p.value),]
+```
+
+In practice, it is helpful to pair the ANOVA results with a fit from a much simpler model
+where we assume that there exists a linear relationship between expression and the pseudotime.
+This yields an interpretable summary of the overall direction of change in the `logFC` field above,
+complementing the more poweful spline-based model used to populate the `p.value` field.
+(In contrast, the magnitude and sign of the spline coefficients cannot be easily interpreted.)
+
+```{r, echo=FALSE}
+offender <- "7"
+o <- order(pseudo$p.value)
+stopifnot(sum(grepl("Ig", head(pseudo$SYMBOL[o], 20))) > 5)
+```
+
+To simplify the results, we will repeat our DE analysis after filtering out cluster `r offender`.
+This cluster seems to contain a set of B cell precursors that are located at one end of the trajectory,
+causing immunoglobulins to dominate the set of DE genes and mask other interesting effects.
+(Incidentally, this is the same cluster that was split into a separate component in the outgroup-based MST.)
+
+```{r}
+discard <- "7"
+keep <- colLabels(sce.nest)!=discard
+pseudo <- testPseudotime(sce.nest[,keep], pseudotime=tscan.pseudo[keep,1])
+pseudo$SYMBOL <- rowData(sce.nest)$SYMBOL
+sorted <- pseudo[order(pseudo$p.value),]
+```
+
+```{r, echo=FALSE}
+stopifnot(identical(discard, offender))
+o <- order(pseudo$p.value)
+stopifnot(sum(grepl("Ig", head(pseudo$SYMBOL[o], 20))) < 2)
+stopifnot(igraph::degree(pseudo.og$mst, discard)==0)
+```
+
+Examination of the top downregulated genes suggests that this pseudotime represents a transition away from myeloid identity,
+based on the decrease in expression of genes such as _Mpo_ and _Plac8_ (Figure \@ref(fig:nest-1-simple-down)).
+
+```{r nest-1-simple-down, fig.asp=3, fig.width=6, fig.cap="Expression of the top 10 genes that decrease in expression with increasing pseudotime along the first path in the MST of the Nestorowa dataset. Each point represents a cell that is mapped to this path and is colored by the assigned cluster."}
+up.left <- sorted[sorted$logFC < 0,]
+head(up.left, 10)
+best <- head(rownames(up.left), 10)
+plotExpression(sce.nest, features=best,
+    x=I(tscan.pseudo[,1]), colour_by="label")
+```
+
+```{r, echo=FALSE, results="hide"}
+stopifnot(all(c("Mpo", "Plac8") %in% head(up.left$SYMBOL, 10)))
+```
+
+Conversely, the later parts of the pseudotime may correspond to a more stem-like state based on upregulation of genes like _Hlf_.
+There is also increased expression of genes associated with the lymphoid lineage (e.g., _Ltb_),
+consistent with reduced commitment to the myeloid lineage at earlier pseudotime values. 
+
+```{r nest-1-simple-up, fig.asp=3, fig.width=6, fig.cap="Expression of the top 10 genes that increase in expression with increasing pseudotime along the first path in the MST of the Nestorowa dataset. Each point represents a cell that is mapped to this path and is colored by the assigned cluster."}
+up.right <- sorted[sorted$logFC > 0,]
+head(up.right, 10)
+best <- head(rownames(up.right), 10)
+plotExpression(sce.nest, features=best, 
+    x=I(tscan.pseudo[,1]), colour_by="label")
+```
+
+```{r, echo=FALSE, results="hide"}
+stopifnot(all(c("Hlf", "Ltb") %in% head(up.right$SYMBOL, 10)))
+```
+
+```{r, eval=FALSE, echo=FALSE}
+## This takes far, far too long.
+#keep <- !is.na(tscan.pseudo[,1])
+#library(tradeSeq)
+#fit <- fitGAM(counts(sce.nest)[,keep], 
+#    pseudotime=tscan.pseudo[keep,1],
+#    cellWeights=rep(1, sum(keep)))
+```
+
+### Changes between paths
+
+A more advanced analysis involves looking for differences in expression between paths of a branched trajectory.
+This is most interesting for cells close to the branch point between two or more paths
+where the differential expression analysis may highlight genes is responsible for the branching event.
+The general strategy here is to fit one trend to the unique part of each path immediately following the branch point,
+followed by a comparison of the fits between paths.
+
+To this end, a particularly tempting approach is to perform another ANOVA with our spline-based model
+and test for significant differences in the spline parameters between paths.
+While this can be done with `testPseudotime()`, 
+we do not do so because the magnitude of the pseudotime has little meaning across lineages.
+A pseudotime value in one path of the MST does not, in general, have any relation to the same value in another path;
+this compromises any comparison of trends as we cannot reliably say that they are being fitted to comparable $x$-axes. 
+
+Rather, we employ the much simpler _ad hoc_ approach of fitting a spline to each trajectory and comparing the sets of DE genes.
+To demonstrate, we focus on the cluster containing the branch point in the Nestorowa-derived MST.
+We recompute the pseudotimes so that changes in expression are detected with respect to separation of paths from each other,
+allowing us to detect genes that are associated with the divergence of the branches.
+
+```{r}
+starter <- "3"
+tscan.pseudo2 <- orderClusterMST(reducedDim(sce.nest, "PCA"), 
+    ids=colLabels(sce.nest), centers=centroids, mst=mst, 
+    start=starter)
+```
+
+```{r, echo=FALSE}
+stopifnot(igraph::degree(mst, starter) == 3)
+```
+
+We then apply `testPseudotime()` to each path involving cluster `r starter`.
+We subset our analysis to only that cluster's cells so as to focus on DE events close to the branch point.
+Because we are operating over a relatively short pseudotime interval, we do not expect complex trends
+and so we set `df=1` (i.e., a linear trend) to avoid problems from overfitting. 
+
+```{r}
+keep <- colLabels(sce.nest) == starter
+sub.nest <- sce.nest[,keep]
+
+pseudo1 <- testPseudotime(sub.nest, df=1, pseudotime=tscan.pseudo2[keep,1])
+pseudo1$SYMBOL <- rowData(sce.nest)$SYMBOL
+pseudo1[order(pseudo1$p.value),]
+
+pseudo2 <- testPseudotime(sub.nest, df=1, pseudotime=tscan.pseudo2[keep,2])
+pseudo2$SYMBOL <- rowData(sce.nest)$SYMBOL
+pseudo2[order(pseudo2$p.value),]
+
+pseudo3 <- testPseudotime(sub.nest, df=1, pseudotime=tscan.pseudo2[keep,3])
+pseudo3$SYMBOL <- rowData(sce.nest)$SYMBOL
+pseudo3[order(pseudo3$p.value),]
+```
+
+We informally compare these results by looking for genes that are significant 
+in our path of interest and are not significant or changing in the opposite direction in the other paths.
+We use the raw $p$-values to look for non-significant genes 
+in order to increase the stringency of the definition of unique genes in our path.
+
+```{r}
+only3 <- pseudo3[which(pseudo3$FDR <= 0.05 & 
+    (pseudo2$p.value >= 0.05 | sign(pseudo1$logFC)!=sign(pseudo3$logFC)) &
+    (pseudo2$p.value >= 0.05 | sign(pseudo2$logFC)!=sign(pseudo3$logFC))),]
+only3[order(only3$p.value),]
+```
+
+We observe upregulation of interesting genes such as _Gata2_, _Cd9_ and _Apoe_ in this path,
+along with downregulation of _Flt3_ (Figure \@ref(fig:nest-3-versus)).
+One might speculate that this path leads to a less differentiated HSC state compared to the other directions.
+
+```{r nest-3-versus, fig.asp=1, fig.width=6, fig.cap="$t$-SNE plots of cells in the cluster containing the branch point of the MST in the Nestorowa dataset. Each point is a cell colored by the expression of a gene of interest and the relevant edges of the MST are overlaid on top."}
+# Showing only the lines to/from our cluster of interest.
+line.data.sub <- line.data[grepl("^3--", line.data$edge) |
+    grepl("--3$", line.data$edge),]
+ggline <- geom_line(data=line.data.sub, 
+    mapping=aes(x=dim1, y=dim2, group=edge))
+
+gridExtra::grid.arrange(
+    plotTSNE(sub.nest, colour_by="ENSMUSG00000042817") + 
+        ggtitle("Flt3") + ggline,
+    plotTSNE(sub.nest, colour_by="ENSMUSG00000002985") + 
+        ggtitle("Apoe") + ggline,
+    plotTSNE(sub.nest, colour_by="ENSMUSG00000015053") + 
+        ggtitle("Gata2") + ggline,
+    plotTSNE(sub.nest, colour_by="ENSMUSG00000030342") + 
+        ggtitle("Cd9") + ggline
+)
+```
+
+```{r, echo=FALSE}
+stopifnot(all(c("Flt3", "Cd9", "Gata2", "Apoe") %in% sorted$SYMBOL))
+```
+
+While simple and practical, this comparison strategy is even less statistically defensible than usual.
+The differential testing machinery is not suited to making inferences on the absence of differences,
+and we should not have used the non-significant genes to draw any conclusions.
+Another limitation is that this approach cannot detect differences in the magnitude of the gradient of the trend between paths; 
+a gene that is significantly upregulated in each of two paths but with a sharper gradient in one of the paths will not be DE.
+(Of course, this is only a limitation if the pseudotimes were comparable in the first place.)
+
+### Further comments
+
+The magnitudes of the $p$-values reported here should be treated with some skepticism.
+The same fundamental problems discussed in Section \@ref(p-value-invalidity) remain;
+the $p$-values are computed from the same data used to define the trajectory,
+and there is only a sample size of 1 in this analysis regardless of the number of cells.
+Nonetheless, the $p$-value is still useful for prioritizing interesting genes 
+in the same manner that it is used to identify markers between clusters.
+
+The previous sections have focused on a very simple and efficient - but largely effective - approach to trend fitting.
+Alternatively, we can use more complex strategies that involve various generalizations to the concept of linear models.
+For example, generalized additive models (GAMs) are quite popular for pseudotime-based DE analyses 
+as they are able to handle non-normal noise distributions and a greater diversity of non-linear trends.
+We demonstrate the use of the GAM implementation from the `r Biocpkg("tradeSeq")` package on the Nestorowa dataset below.
+Specifically, we will take a leap of faith and assume that our pseudotime values are comparable across paths of the MST,
+allowing us to use the `patternTest()` function to test for significant differences in expression between paths.
+
+```{r}
+# Getting rid of the NA's; using the cell weights
+# to indicate which cell belongs on which path.
+nonna.pseudo <- tscan.pseudo
+nonna.pseudo[is.na(nonna.pseudo)] <- 0
+cell.weights <- !is.na(tscan.pseudo)
+storage.mode(cell.weights) <- "numeric"
+
+# Fitting a GAM on the subset of genes for speed.
+library(tradeSeq)
+fit <- fitGAM(counts(sce.nest)[1:100,], 
+    pseudotime=nonna.pseudo,
+    cellWeights=cell.weights)
+
+res <- patternTest(fit)
+res$Symbol <- rowData(sce.nest)[1:100,"SYMBOL"]
+res <- res[order(res$pvalue),]
+head(res, 10)
+```
+
+From a statistical perspective, the GAM is superior to linear models as the former uses the raw counts.
+This accounts for the idiosyncrasies of the mean-variance relationship for low counts and avoids some problems with spurious trajectories introduced by the log-transformation (Section \@ref(normalization-transformation)).
+However, this sophistication comes at the cost of increased complexity and compute time,
+requiring parallelization via `r Biocpkg("BiocParallel")` even for relatively small datasets.
+
+When a trajectory consists of a series of clusters (as in the Nestorowa dataset),
+pseudotime-based DE tests can be considered a continuous generalization of cluster-based marker detection.
+One would expect to identify similar genes by performing an ANOVA on the per-cluster expression values,
+and indeed, this may be a more interpretable approach as it avoids imposing the assumption that a trajectory exists at all.
+The main benefit of pseudotime-based tests is that they encourage expression to be a smooth function of pseudotime,
+assuming that the degrees of freedom in the trend fit prevents overfitting.
+This smoothness reflects an expectation that changes in expression along a trajectory should be gradual. 
+
+## Finding the root
+
+### Overview
+
+The pseudotime calculations rely on some specification of the root of the trajectory to define "position zero".
+In some cases, this choice has little effect beyond flipping the sign of the gradients of the DE genes.
+In other cases, this choice may necessarily arbitrary depending on the questions being asked,
+e.g., what are the genes driving the transition to or from a particular part of the trajectory?
+However, in situations where the trajectory is associated with a time-dependent biological process, 
+the position on the trajectory corresponding to the earliest timepoint is clearly the best default choice for the root.
+This simplifies interpretation by allowing the pseudotime to be treated as a proxy for real time.
+
+<!--
+The task of finding a root has some analogies in other fields such as phylogenetics,
+where practitioners typically root a tree using outgroups or midpoints.
+However, the problem here is fundamentally different; the ancestral nodes are not directly observed in phylogenetic trees
+whereas all states of a trajectory are present in a single-cell dataset.
+This precludes the use of existing phylogenetic methods (e.g., midpoint rooting makes little sense for a trajectory)
+and requires some more bespoke approaches that will be discussed below.
+-->
+
+### Entropy-based methods
+
+Trajectories are commonly used to characterize differentiation where branches are interpreted as multiple lineages.
+In this setting, the root of the trajectory is best set to the "start" of the differentiation process,
+i.e., the most undifferentiated state that is observed in the dataset.
+It is usually possible to identify this state based on the genes that are expressed at each point of the trajectory.
+However, when such prior biological knowledge is not available, we can fall back to the more general concept that undifferentiated cells have more diverse expression profiles [@gulati2020singlecell].
+The assumption is that terminally differentiated cells have expression profiles that are highly specialized for their function while multipotent cells have no such constraints - and indeed, may need to have active expression programs for many lineages in preparation for commitment to any of them.
+
+```{r, echo=FALSE}
+lowest <- c("5", "8")
+low.text <- paste(paste(head(lowest, -1), collapse=", "), "and", tail(lowest, 1))
+```
+
+We quantify the diversity of expression by computing the entropy of the expression profile within each cell [@grun2016denovo;@guo2017slice;@teschendorff2017singlecell], with higher entropy corresponding to greater diversity and thus reduced differentiation.
+To demonstrate, we examine the entropies for each cluster in the Nestorowa HSC dataset (Figure \@ref(fig:entropy-nest)).
+We observe that clusters `r low.text` have the highest entropies, 
+which suggests that they represent the least differentiated state within the trajectory.
+It is also reassuring that these two clusters are adjacent on the MST (Figure \@ref(fig:tscan-nest-tsne)),
+which is consistent with branched differentiation "away" from a single root.
+
+```{r entropy-nest, fig.cap="Distribution of per-cell entropies for each cluster in the Nestorowa dataset. The median entropy for each cluster is shown as a point in the violin plot."}
+# TODO: shovel this into a function somewhere.
+library(scuttle)
+nzero <- whichNonZero(counts(sce.nest)) 
+p <- nzero$x / colSums(counts(sce.nest))[nzero$j]
+entropy <- - p * log(p)
+entropy <- by(entropy, INDICES=nzero$j, FUN=sum)
+
+ent.data <- data.frame(cluster=colLabels(sce.nest), 
+    entropy=as.vector(entropy))
+ggplot(ent.data, aes(x=cluster, y=entropy)) + geom_violin() +
+    stat_summary(fun=median, geom="point")
+```
+
+```{r, echo=FALSE}
+# Checking that they are the lowest.
+lowest.e <- vapply(split(entropy, colLabels(sce.nest)), median, 0)
+rest <- setdiff(names(lowest.e), lowest)
+stopifnot(min(lowest.e[lowest]) > max(lowest.e[rest]))
+
+# Checking that they are all connected in the MST.
+sub <- igraph::graph_from_adjacency_matrix(mst[][lowest,lowest], weighted=TRUE)
+stopifnot(igraph::components(sub)$no==1)
+```
+
+Of course, this interpretation is fully dependent on whether the underlying assumption is reasonable.
+While the association between diversity and differentiation potential is likely to be generally applicable,
+it may not be sufficiently precise to enable claims on the relative potency of closely related subpopulations.
+Indeed, other processes such as stress or metabolic responses may interfere with the entropy comparisons.
+Furthermore, at low counts, the magnitude of the entropy is dependent on sequencing depth 
+in a manner that cannot be corrected by scaling normalization.
+Cells with lower coverage will have lower entropy even if the underlying transcriptional diversity is the same,
+which may confound the interpretation of entropy as a measure of potency.
+
+```{r, echo=FALSE, fig.show='hide'}
+# Demonstration.
+scaling <- c(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1)
+y <- outer(1:10000/100, scaling)
+y[] <- rpois(length(y), lambda=y)
+
+z <- t(y) / colSums(y)
+ent <- - z * log(z)
+ent[is.na(ent)] <- 0
+plot(scaling, rowSums(ent), log="x", type='b')
+```
+
+### RNA velocity
+
+Another strategy is to use the concept of "RNA velocity" to identify the root [@lamanno2018rna].
+For a given gene, a high ratio of unspliced to spliced transcripts indicates that that gene is being actively upregulated, 
+under the assumption that the increase in transcription exceeds the capability of the splicing machinery to process the pre-mRNA.
+Conversely, a low ratio indicates that the gene is being downregulated as the rate of production and processing of pre-mRNAs cannot compensate for the degradation of mature transcripts. 
+Thus, we can infer that cells with high and low ratios are moving towards a high- and low-expression state, respectively, 
+allowing us to assign directionality to any trajectory or even individual cells.
+
+To demonstrate, we will use matrices of spliced and unspliced counts from **INSERT DATASET HERE**.
+The spliced count matrix can be generated in the standard manner
+while the unspliced count matrix considers the entire genomic sequence of the nascent transcript.
+Conveniently, both matrices have the same shape and thus can be stored as separate assays in our usual `SingleCellExperiment`.
+
+```{r}
+library(scuttle)
+sce1 <- mockSCE()
+sce2 <- mockSCE()
+
+exonic <- counts(sce1)
+unspliced <- counts(sce2)
+```
+
+We use the `r basilisk::PyPiLink("scvelo")` Python package [@bergen2019generalizing] to perform the velocity calculations.
+This offers some improvements over the original implementation by @lamanno2018rna, most notably eliminating the need for observed subpopulations at steady state (i.e., where the rates of transcription, splicing and degradation are equal).
+We use the `r Biocpkg("basilisk")` package to provision a Python environment with which we can run `r basilisk::PyPiLink("scvelo")` via `r CRANpkg("reticulate")`.
+We refer readers to the [relevant documentation](https://scvelo.readthedocs.io/) for more details about the Python function calls.
+
+```{r}
+library(basilisk)
+setupBasiliskEnv("scvelo", packages=NULL, pip="scvelo==0.2.1")
+
+output <- basiliskRun(env="scvelo", fun=function(exonic, unspliced) {
+    and <- reticulate::import("anndata")
+    scv <- reticulate::import("scvelo")
+
+    adata <- and$AnnData(exonic, 
+        layers=list(spliced=exonic, unspliced=unspliced))
+    scv$pp$filter_and_normalize(adata)
+    scv$pp$moments(adata) 
+
+    scv$tl$velocity(adata, mode='stochastic')
+    scv$tl$velocity_graph(adata)
+    scv$tl$velocity_pseudotime(adata)
+
+    list(pseudotime=adata$obs$velocity_pseudotime,
+        roots=adata$obs$root_cells,
+        endpoints=adata$obs$end_points)
+}, exonic=counts(sce1), unspliced=counts(sce2))
+```
+
+**Say something about the results here when we actually get some data.**
+
+```{r}
+str(output)
+```
+
+Needless to say, this lunch is not entirely free.
+The inferences rely on a somewhat sophisticated mathematical model that has a few assumptions,
+the most obvious of which being that the transcriptional dynamics are the same across subpopulations.
+The use of unspliced counts increases the sensitivity of the analysis to novel transcripts (e.g., microRNAs in the gene body), 
+intron retention events, annotation errors or quantification ambiguities [@soneson2020preprocessing] 
+that could interfere with the velocity calculations.
+There is also the question of whether there is enough intronic coverage to reliably estimate the velocity for the relevant genes for the process of interest, and if not, whether this lack of information may bias the resulting velocity estimates.
+From a purely practical perspective, the main difficulty with RNA velocity is that the unspliced counts are often unavailable.
+
+<!--
+Other assumptions that didn't make the cut to be mentioned:
+
+- Velocities can be reversed to construct the pseudotime,
+i.e., the past location of a cell is defined as the location of other cells that are moving towards that cell.
+Most obviously not the case if there are no longer any observed cells in the past location,
+though this represents a common weakness of all trajectory inference methods.
+
+- The velocity-inferred pseudotime is not a proxy for real time, which I didn't think needed to be said.
+Obviously, these cells were all collected at the same time, so it cannot be a proxy for real time!
+At best it is a proxy for the age of the cells as for other pseudotime values,
+though with the added benefit that it gets past the directionality difficulty.
+
+- There are enough cells still in transit to obtain meaningful pseudotime orderings.
+If this is not the case, the pseudotimes are scrambled, which is not wrong but not useful either.
+Related is the assumption that the velocity-defined pseudotime lies along the relevant continuum.
+A continuum in a steady-state population would simply not be captured.
+
+With respect to bias, the most obvious example is that of a trajectory driven by a few genes, all of which lack intronic counts. 
+What happens then?
+The trajectory is still there but who knows where the arrows might point?
+-->
+
+### Real timepoints
+
+There does, however, exist a gold-standard approach to rooting a trajectory:
+simply collect multiple real-life timepoints over the course of a biological process
+and use the population(s) at the earliest time point as the root.
+This approach experimentally defines a link between pseudotime and real time without requiring any further assumptions.
+To demonstrate, we will use the activated T cell dataset from @richard2018tcell
+where they collected CD8^+^ T cells at various time points after ovalbumin stimulation.
+
+```{r}
+library(scRNAseq)
+sce.richard <- RichardTCellData()
+sce.richard <- sce.richard[,sce.richard$`single cell quality`=="OK"]
+
+# Only using cells treated with the highest affinity peptide 
+# plus the unstimulated cells as time zero.
+sub.richard <- sce.richard[,sce.richard$stimulus %in%
+    c("OT-I high affinity peptide N4 (SIINFEKL)", "unstimulated")]
+sub.richard$time[is.na(sub.richard$time)] <- 0
+table(sub.richard$time)
+```
+
+We run through the standard workflow for single-cell data with spike-ins -
+see Sections \@ref(spike-norm) and \@ref(sec:spikeins) for more details.
+
+```{r}
+sub.richard <- computeSpikeFactors(sub.richard, "ERCC")
+sub.richard <- logNormCounts(sub.richard)
+dec.richard <- modelGeneVarWithSpikes(sub.richard, "ERCC")
+top.hvgs <- getTopHVGs(dec.richard, prop=0.2)
+sub.richard <- denoisePCA(sub.richard, technical=dec.richard, subset.row=top.hvgs)
+```
+
+We can then run our trajectory inference method of choice.
+As we expecting a fairly simple trajectory, we will keep matters simple and use `slingshot()` without any clusters.
+This yields a pseudotime that is strongly associated with real time (Figure \@ref(fig:tcell-pseudotime))
+and from which it is straightforward to identify the best location of the root.
+The rooted trajectory can then be used to determine the "real time equivalent" of other activation stimuli,
+see @richard2018tcell for more details.
+
+```{r tcell-pseudotime, fig.cap="Pseudotime as a function of real time in the Richard T cell dataset."}
+sub.richard <- slingshot(sub.richard, reducedDim="PCA")
+plot(sub.richard$time, sub.richard$slingPseudotime_1, 
+    xlab="Time (hours)", ylab="Pseudotime")
+```
+
+```{r, echo=FALSE}
+time.med <- vapply(split(sub.richard$slingPseudotime_1, sub.richard$time), median, 0)
+stopifnot(!is.unsorted(time.med))
+```
+
+Of course, this strategy relies on careful experimental design to ensure that multiple timepoints are actually collected.
+This requires more planning and resources (i.e., cost!) and is frequently absent from many scRNA-seq studies that only consider a single "snapshot" of the system.
+Generation of multiple timepoints also requires an amenable experimental system where the initiation of the process of interest can be tightly controlled.
+This is often more complex to set up than a strictly observational study, though having causal information arguably makes the data more useful for making inferences.
+
+## Session information {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

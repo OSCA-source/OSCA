@@ -1,0 +1,138 @@
+# Bach mouse mammary gland (10X Genomics)
+
+```{r unref-setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble(cache=TRUE)
+```
+
+## Introduction
+
+This performs an analysis of the @bach2017differentiation 10X Genomics dataset,
+from which we will consider a single sample of epithelial cells from the mouse mammary gland during gestation.
+
+## Data loading
+
+```{r loading}
+library(scRNAseq)
+sce.mam <- BachMammaryData(samples="G_1")
+```
+
+```{r gene-annotation}
+library(scater)
+rownames(sce.mam) <- uniquifyFeatureNames(
+    rowData(sce.mam)$Ensembl, rowData(sce.mam)$Symbol)
+
+library(AnnotationHub)
+ens.mm.v97 <- AnnotationHub()[["AH73905"]]
+rowData(sce.mam)$SEQNAME <- mapIds(ens.mm.v97, keys=rowData(sce.mam)$Ensembl,
+    keytype="GENEID", column="SEQNAME")
+```
+
+## Quality control
+
+```{r}
+unfiltered <- sce.mam
+```
+
+```{r quality-control}
+is.mito <- rowData(sce.mam)$SEQNAME == "MT"
+stats <- perCellQCMetrics(sce.mam, subsets=list(Mito=which(is.mito)))
+qc <- quickPerCellQC(stats, percent_subsets="subsets_Mito_percent")
+sce.mam <- sce.mam[,!qc$discard]
+```
+
+```{r unref-bach-qc-dist, fig.wide=TRUE, fig.cap="Distribution of each QC metric across cells in the Bach mammary gland dataset. Each point represents a cell and is colored according to whether that cell was discarded."}
+colData(unfiltered) <- cbind(colData(unfiltered), stats)
+unfiltered$discard <- qc$discard
+
+gridExtra::grid.arrange(
+    plotColData(unfiltered, y="sum", colour_by="discard") + 
+        scale_y_log10() + ggtitle("Total count"),
+    plotColData(unfiltered, y="detected", colour_by="discard") + 
+        scale_y_log10() + ggtitle("Detected features"),
+    plotColData(unfiltered, y="subsets_Mito_percent", 
+        colour_by="discard") + ggtitle("Mito percent"),
+    ncol=2
+)
+```
+
+```{r unref-bach-qc-comp, fig.cap="Percentage of mitochondrial reads in each cell in the Bach mammary gland dataset compared to its total count. Each point represents a cell and is colored according to whether that cell was discarded."}
+plotColData(unfiltered, x="sum", y="subsets_Mito_percent", 
+    colour_by="discard") + scale_x_log10()
+```
+
+```{r}
+colSums(as.matrix(qc))
+```
+
+## Normalization 
+
+```{r normalization}
+library(scran)
+set.seed(101000110)
+clusters <- quickCluster(sce.mam)
+sce.mam <- computeSumFactors(sce.mam, clusters=clusters)
+sce.mam <- logNormCounts(sce.mam)
+```
+
+```{r}
+summary(sizeFactors(sce.mam))
+```
+
+```{r unref-bach-norm, fig.cap="Relationship between the library size factors and the deconvolution size factors in the Bach mammary gland dataset."}
+plot(librarySizeFactors(sce.mam), sizeFactors(sce.mam), pch=16,
+    xlab="Library size factors", ylab="Deconvolution factors", log="xy")
+```
+
+## Variance modelling
+
+We use a Poisson-based technical trend to capture more genuine biological variation in the biological component.
+
+```{r variance-modelling}
+set.seed(00010101)
+dec.mam <- modelGeneVarByPoisson(sce.mam)
+top.mam <- getTopHVGs(dec.mam, prop=0.1)
+```
+
+```{r unref-bach-var, fig.cap="Per-gene variance as a function of the mean for the log-expression values in the Bach mammary gland dataset. Each point represents a gene (black) with the mean-variance trend (blue) fitted to simulated Poisson counts."}
+plot(dec.mam$mean, dec.mam$total, pch=16, cex=0.5,
+    xlab="Mean of log-expression", ylab="Variance of log-expression")
+curfit <- metadata(dec.mam)
+curve(curfit$trend(x), col='dodgerblue', add=TRUE, lwd=2)
+```
+
+## Dimensionality reduction
+
+```{r dimensionality-reduction}
+library(BiocSingular)
+set.seed(101010011)
+sce.mam <- denoisePCA(sce.mam, technical=dec.mam, subset.row=top.mam)
+sce.mam <- runTSNE(sce.mam, dimred="PCA")
+```
+
+```{r}
+ncol(reducedDim(sce.mam, "PCA"))
+```
+
+## Clustering 
+
+We use a higher `k` to obtain coarser clusters (for use in `doubletCluster()` later).
+
+```{r clustering}
+snn.gr <- buildSNNGraph(sce.mam, use.dimred="PCA", k=25)
+colLabels(sce.mam) <- factor(igraph::cluster_walktrap(snn.gr)$membership)
+```
+
+```{r}
+table(colLabels(sce.mam))
+```
+
+```{r unref-bach-tsne, fig.cap="Obligatory $t$-SNE plot of the Bach mammary gland dataset, where each point represents a cell and is colored according to the assigned cluster."}
+plotTSNE(sce.mam, colour_by="label")
+```
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

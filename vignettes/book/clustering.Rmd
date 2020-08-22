@@ -1,0 +1,830 @@
+---
+bibliography: ref.bib
+---
+
+# Clustering
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+## Motivation
+
+Clustering is an unsupervised learning procedure that is used in scRNA-seq data analysis to empirically define groups of cells with similar expression profiles.
+Its primary purpose is to summarize the data in a digestible format for human interpretation. 
+This allows us to describe population heterogeneity in terms of discrete labels that are easily understood, rather than attempting to comprehend the high-dimensional manifold on which the cells truly reside.
+After annotation based on marker genes, the clusters can be treated as proxies for more abstract biological concepts such as cell types or states.
+Clustering is thus a critical step for extracting biological insights from scRNA-seq data.
+Here, we demonstrate the application of several commonly used methods with the 10X PBMC dataset. 
+
+```{r, results='asis', echo=FALSE}
+extractCached("tenx-unfiltered-pbmc4k.Rmd", "dimensionality-reduction", "sce.pbmc")
+```
+
+```{r}
+sce.pbmc
+```
+
+## What is the "true clustering"?
+
+At this point, it is worth stressing the distinction between clusters and cell types.
+The former is an empirical construct while the latter is a biological truth (albeit a vaguely defined one).
+For this reason, questions like "what is the true number of clusters?" are usually meaningless.
+We can define as many clusters as we like, with whatever algorithm we like - each clustering will represent its own partitioning of the high-dimensional expression space, and is as "real" as any other clustering.
+
+A more relevant question is "how well do the clusters approximate the cell types?"
+Unfortunately, this is difficult to answer given the context-dependent interpretation of biological truth.
+Some analysts will be satisfied with resolution of the major cell types; other analysts may want resolution of subtypes; and others still may require resolution of different states (e.g., metabolic activity, stress) within those subtypes.
+Moreover, two clusterings can be highly inconsistent yet both valid, simply partitioning the cells based on different aspects of biology.
+Indeed, asking for an unqualified "best" clustering is akin to asking for the best magnification on a microscope without any context.
+
+It is helpful to realize that clustering, like a microscope, is simply a tool to explore the data.
+We can zoom in and out by changing the resolution of the clustering parameters, and we can experiment with different clustering algorithms to obtain alternative perspectives of the data.
+This iterative approach is entirely permissible for data exploration, which constitutes the majority of all scRNA-seq data analyses.
+   
+## Graph-based clustering {#clustering-graph}
+
+### Background
+
+Popularized by its use in `r CRANpkg("Seurat")`, graph-based clustering is a flexible and scalable technique for clustering large scRNA-seq datasets.
+We first build a graph where each node is a cell that is connected to its nearest neighbors in the high-dimensional space.
+Edges are weighted based on the similarity between the cells involved, with higher weight given to cells that are more closely related.
+We then apply algorithms to identify "communities" of cells that are more connected to cells in the same community than they are to cells of different communities.
+Each community represents a cluster that we can use for downstream interpretation.
+
+The major advantage of graph-based clustering lies in its scalability.
+It only requires a $k$-nearest neighbor search that can be done in log-linear time on average, in contrast to hierachical clustering methods with runtimes that are quadratic with respect to the number of cells.
+Graph construction avoids making strong assumptions about the shape of the clusters or the distribution of cells within each cluster, compared to other methods like $k$-means (that favor spherical clusters) or Gaussian mixture models (that require normality).
+From a practical perspective, each cell is forcibly connected to a minimum number of neighboring cells, which reduces the risk of generating many uninformative clusters consisting of one or two outlier cells.
+
+The main drawback of graph-based methods is that, after graph construction, no information is retained about relationships beyond the neighboring cells^[Sten Linarrsson talked about this in SCG2018, but I don't know where that work ended up. So this is what passes as a reference for the time being.].
+This has some practical consequences in datasets that exhibit differences in cell density, as more steps through the graph are required to move the same distance through a region of higher cell density.
+From the perspective of community detection algorithms, this effect "inflates" the high-density regions such that any internal substructure or noise is more likely to cause formation of subclusters.
+The resolution of clustering thus becomes dependent on the density of cells, which can occasionally be misleading if it overstates the heterogeneity in the data.
+
+```{r, echo=FALSE, eval=FALSE}
+set.seed(999)
+
+# For contributors who don't believe me, try this out.
+a <- matrix(rnorm(100000, 10), ncol=10)
+b <- matrix(rnorm(100, 0), ncol=10)
+x <- rbind(a, b)
+
+library(scran)
+g <- buildSNNGraph(x, transposed=TRUE, type="jaccard")
+out <- igraph::cluster_louvain(g)$membership
+table(out)
+```
+
+### Implementation
+
+There are several considerations in the practical execution of a graph-based clustering method:
+
+- How many neighbors are considered when constructing the graph.
+- What scheme is used to weight the edges.
+- Which community detection algorithm is used to define the clusters.
+
+For example, the following code uses the 10 nearest neighbors of each cell to construct a shared nearest neighbor graph.
+Two cells are connected by an edge if any of their nearest neighbors are shared,
+with the edge weight defined from the highest average rank of the shared neighbors [@xu2015identification].
+The Walktrap method from the `r CRANpkg("igraph")` package is then used to identify communities.
+All calculations are performed using the top PCs to take advantage of data compression and denoising.
+
+```{r}
+library(scran)
+g <- buildSNNGraph(sce.pbmc, k=10, use.dimred = 'PCA')
+clust <- igraph::cluster_walktrap(g)$membership
+table(clust)
+```
+
+Alternatively, users may prefer to use the `clusterRows()` function from the `r Biocpkg("bluster")` package.
+This calls the exact same series of functions when run in graph-based mode with the `NNGraphParam()` argument;
+however, it is often more convenient if we want try out different clustering procedures, as we can simply change the second argument to use a different set of parameters or a different algorithm altogether.
+
+```{r}
+library(bluster)
+clust2 <- clusterRows(reducedDim(sce.pbmc, "PCA"), NNGraphParam())
+table(clust2) # same as above.
+```
+
+```{r, echo=FALSE}
+stopifnot(identical(factor(clust), clust2))
+```
+
+We assign the cluster assignments back into our `SingleCellExperiment` object as a factor in the column metadata.
+This allows us to conveniently visualize the distribution of clusters in a $t$-SNE plot (Figure \@ref(fig:tsne-clust-graph)).
+
+```{r tsne-clust-graph, fig.cap="$t$-SNE plot of the 10X PBMC dataset, where each point represents a cell and is coloured according to the identity of the assigned cluster from graph-based clustering."}
+library(scater)
+colLabels(sce.pbmc) <- factor(clust)
+plotReducedDim(sce.pbmc, "TSNE", colour_by="label")
+```
+
+One of the most important parameters is `k`, the number of nearest neighbors used to construct the graph.
+This controls the resolution of the clustering where higher `k` yields a more inter-connected graph and broader clusters.
+Users can exploit this by experimenting with different values of `k` to obtain a satisfactory resolution.
+
+```{r}
+# More resolved.
+g.5 <- buildSNNGraph(sce.pbmc, k=5, use.dimred = 'PCA')
+clust.5 <- igraph::cluster_walktrap(g.5)$membership
+table(clust.5)
+
+# Less resolved.
+g.50 <- buildSNNGraph(sce.pbmc, k=50, use.dimred = 'PCA')
+clust.50 <- igraph::cluster_walktrap(g.50)$membership
+table(clust.50)
+```
+
+```{r, echo=FALSE}
+stopifnot(length(unique(clust)) < length(unique(clust.5)))
+stopifnot(length(unique(clust)) > length(unique(clust.50)))
+```
+
+The graph itself can be visualized using a force-directed layout (Figure \@ref(fig:pbmc-force)).
+This yields a dimensionality reduction result that is closely related to $t$-SNE and UMAP, though which of these is the most aesthetically pleasing is left to the eye of the beholder.
+
+```{r pbmc-force, message=FALSE, fig.cap="Force-directed layout for the shared nearest-neighbor graph of the PBMC dataset. Each point represents a cell and is coloured according to its assigned cluster identity."}
+set.seed(2000)
+reducedDim(sce.pbmc, "force") <- igraph::layout_with_fr(g)
+plotReducedDim(sce.pbmc, colour_by="label", dimred="force")
+```
+
+### Other parameters
+
+Further tweaking can be performed by changing the edge weighting scheme during graph construction.
+Setting `type="number"` will weight edges based on the number of nearest neighbors that are shared between two cells.
+Similarly, `type="jaccard"` will weight edges according to the Jaccard index of the two sets of neighbors.
+We can also disable weighting altogether by using `buildKNNGraph()`, which is occasionally useful for downstream graph operations that do not support weights.
+
+```{r}
+g.num <- buildSNNGraph(sce.pbmc, use.dimred="PCA", type="number")
+g.jaccard <- buildSNNGraph(sce.pbmc, use.dimred="PCA", type="jaccard")
+g.none <- buildKNNGraph(sce.pbmc, use.dimred="PCA")
+```
+
+All of these `g` variables are `graph` objects from the `r CRANpkg("igraph")` package and can be used with any of the community detection algorithms provided by `r CRANpkg("igraph")`.
+We have already mentioned the Walktrap approach, but many others are available to choose from:
+
+```{r}
+clust.louvain <- igraph::cluster_louvain(g)$membership
+clust.infomap <- igraph::cluster_infomap(g)$membership
+clust.fast <- igraph::cluster_fast_greedy(g)$membership
+clust.labprop <- igraph::cluster_label_prop(g)$membership
+clust.eigen <- igraph::cluster_leading_eigen(g)$membership
+```
+
+It is then straightforward to compare two clustering strategies to see how they differ.
+For example, Figure \@ref(fig:walktrap-v-others) suggests that Infomap yields finer clusters than Walktrap while fast-greedy yields coarser clusters.
+
+```{r walktrap-v-others, fig.asp=2, fig.cap="Number of cells assigned to combinations of cluster labels with different community detection algorithms in the PBMC dataset. Each entry of each heatmap represents a pair of labels, coloured proportionally to the log-number of cells with those labels."}
+library(pheatmap)
+
+# Using a large pseudo-count for a smoother color transition
+# between 0 and 1 cell in each 'tab'.
+tab <- table(paste("Infomap", clust.infomap), 
+    paste("Walktrap", clust))
+ivw <- pheatmap(log10(tab+10), main="Infomap vs Walktrap",
+    color=viridis::viridis(100), silent=TRUE)
+
+tab <- table(paste("Fast", clust.fast), 
+    paste("Walktrap", clust))
+fvw <- pheatmap(log10(tab+10), main="Fast-greedy vs Walktrap",
+    color=viridis::viridis(100), silent=TRUE)
+
+gridExtra::grid.arrange(ivw[[4]], fvw[[4]])
+```
+
+```{r, echo=FALSE}
+# Checking my comments above.
+stopifnot(length(unique(clust.fast)) < length(unique(clust)))
+stopifnot(length(unique(clust.infomap)) > length(unique(clust)))
+```
+
+Some community detection algorithms operate by agglomeration and thus can be used to construct a hierarchical dendrogram based on the pattern of merges between clusters.
+The dendrogram itself is not particularly informative as it simply describes the order of merge steps performed by the algorithm; unlike the dendrograms produced by hierarchical clustering (Section \@ref(hierarchical-clustering)), it does not capture the magnitude of differences between subpopulations.
+However, it does provide a convenient avenue for manually tuning the clustering resolution by generating nested clusterings using the `cut_at()` function, as shown below.
+
+```{r}
+community.walktrap <- igraph::cluster_walktrap(g)
+table(igraph::cut_at(community.walktrap, n=5))
+table(igraph::cut_at(community.walktrap, n=20))
+```
+
+Pipelines involving `r Biocpkg("scran")` default to rank-based weights followed by Walktrap clustering.
+In contrast, `r CRANpkg("Seurat")` uses Jaccard-based weights followed by Louvain clustering.
+Both of these strategies work well, and it is likely that the same could be said for many other combinations of weighting schemes and community detection algorithms.
+
+### Assessing cluster separation
+
+When dealing with graphs, the modularity is a natural metric for evaluating the separation between communities/clusters.
+This is defined as the (scaled) difference between the observed total weight of edges between nodes in the same cluster and the expected total weight if edge weights were randomly distributed across all pairs of nodes.
+Larger modularity values indicate that there most edges occur within clusters, suggesting that the clusters are sufficiently well separated to avoid edges forming between neighboring cells in different clusters.
+
+The standard approach is to report a single modularity value for a clustering on a given graph.
+This is useful for comparing different clusterings on the same graph - and indeed, some community detection algorithms are designed with the aim of maximizing the modularity - but it is less helpful for interpreting a given clustering.
+Rather, we use the `clusterModularity()` function with `as.ratio=TRUE`, which returns the ratio of the observed to expected sum of weights between each pair of clusters.
+We use the ratio instead of the difference as the former is less dependent on the number of cells in each cluster.
+
+```{r}
+ratio <- clusterModularity(g, clust, as.ratio=TRUE)
+dim(ratio)
+```
+
+In this matrix, each row/column corresponds to a cluster and each entry contains the ratio of the observed to total weight of edges between cells in the respective clusters.
+A dataset containing well-separated clusters should contain most of the observed total weight on the diagonal entries, i.e., most edges occur between cells in the same cluster.
+Indeed, concentration of the weight on the diagonal of (Figure \@ref(fig:cluster-mod)) indicates that most of the clusters are well-separated, while some modest off-diagonal entries represent closely related clusters with more inter-connecting edges.
+
+```{r cluster-mod, fig.cap="Heatmap of the log~2~-ratio of the total weight between nodes in the same cluster or in different clusters, relative to the total weight expected under a null model of random links."}
+library(pheatmap)
+pheatmap(log2(ratio+1), cluster_rows=FALSE, cluster_cols=FALSE,
+    color=colorRampPalette(c("white", "blue"))(100))
+```
+
+One useful approach is to use the `ratio` matrix to form another graph where the nodes are clusters rather than cells.
+Edges between nodes are weighted according to the ratio of observed to expected edge weights between cells in those clusters.
+We can then repeat our graph operations on this new cluster-level graph to explore the relationships between clusters.
+For example, we could obtain clusters of clusters, or we could simply create a new cluster-based layout for visualization (Figure \@ref(fig:cluster-graph)).
+This is analogous to the "graph abstraction" approach described by @wolf2017graph, which can be used to identify trajectories in the data based on high-weight paths between clusters.
+
+```{r cluster-graph, fig.cap="Force-based layout showing the relationships between clusters based on the log-ratio of observed to expected total weights between nodes in different clusters. The thickness of the edge between a pair of clusters is proportional to the corresponding log-ratio."}
+cluster.gr <- igraph::graph_from_adjacency_matrix(log2(ratio+1), 
+    mode="upper", weighted=TRUE, diag=FALSE)
+
+# Increasing the weight to increase the visibility of the lines.
+set.seed(11001010)
+plot(cluster.gr, edge.width=igraph::E(cluster.gr)$weight*5,
+    layout=igraph::layout_with_lgl)
+```
+
+Incidentally, some readers may have noticed that all `r CRANpkg("igraph")` commands were prefixed with `igraph::`.
+We have done this deliberately to avoid bringing `igraph::normalize` into the global namespace.
+Rather unfortunately, this `normalize` function accepts any argument and returns `NULL`, which causes difficult-to-diagnose bugs when it overwrites `normalize` from `r Biocpkg("BiocGenerics")`.
+
+## $k$-means clustering 
+
+### Background
+
+$k$-means clustering is a classic technique that aims to partition cells into $k$ clusters.
+Each cell is assigned to the cluster with the closest centroid, which is done by minimizing the within-cluster sum of squares using a random starting configuration for the $k$ centroids.
+The main advantage of this approach lies in its speed, given the simplicity and ease of implementation of the algorithm.
+However, it suffers from a number of serious shortcomings that reduce its appeal for obtaining interpretable clusters:
+
+- It implicitly favors spherical clusters of equal radius.
+This can lead to unintuitive partitionings on real datasets that contain groupings with irregular sizes and shapes.
+- The number of clusters $k$ must be specified beforehand and represents a hard cap on the resolution of the clustering..
+For example, setting $k$ to be below the number of cell types will always lead to co-clustering of two cell types, regardless of how well separated they are.
+In contrast, other methods like graph-based clustering will respect strong separation even if the relevant resolution parameter is set to a low value.
+- It is dependent on the randomly chosen initial coordinates.
+This requires multiple runs to verify that the clustering is stable.
+
+That said, $k$-means clustering is still one of the best approaches for sample-based data compression. 
+In this application, we set $k$ to a large value such as the square root of the number of cells to obtain fine-grained clusters.
+These are not meant to be interpreted directly, but rather, the centroids are treated as "samples" for further analyses.
+The idea here is to obtain a single representative of each region of the expression space, reducing the number of samples and computational work in later steps like, e.g., trajectory reconstruction [@ji2016tscan].
+This approach will also eliminate differences in cell density across the expression space, ensuring that the most abundant cell type does not dominate downstream results. 
+
+### Base implementation 
+
+Base R provides the `kmeans()` function that does as its name suggests.
+We call this on our top PCs to obtain a clustering for a specified number of clusters in the `centers=` argument, after setting the random seed to ensure that the results are reproducible.
+In general, the $k$-means clusters correspond to the visual clusters on the $t$-SNE plot in Figure \@ref(fig:tsne-clust-kmeans), though there are some divergences that are not observed in, say, Figure \@ref(fig:tsne-clust-graph).
+(This is at least partially due to the fact that $t$-SNE is itself graph-based and so will naturally agree more with a graph-based clustering strategy.)
+
+```{r tsne-clust-kmeans, fig.cap="$t$-SNE plot of the 10X PBMC dataset, where each point represents a cell and is coloured according to the identity of the assigned cluster from $k$-means clustering."}
+set.seed(100)
+clust.kmeans <- kmeans(reducedDim(sce.pbmc, "PCA"), centers=10)
+table(clust.kmeans$cluster)
+
+colLabels(sce.pbmc) <- factor(clust.kmeans$cluster)
+plotReducedDim(sce.pbmc, "TSNE", colour_by="label")
+```
+
+If we were so inclined, we could obtain a "reasonable" choice of $k$ by computing the gap statistic using methods from the `r CRANpkg("cluster")` package.
+This is the log-ratio of the expected to observed within-cluster sum of squares, where the expected value is computed by randomly distributing cells within the minimum bounding box of the original data.
+A larger gap statistic represents a lower observed sum of squares - and thus better clustering - compared to a population with no structure.
+Ideally, we would choose the $k$ that maximizes the gap statistic, but this is often unhelpful as the tendency of $k$-means to favor spherical clusters drives a large $k$ to capture different cluster shapes.
+Instead, we choose the most parsimonious $k$ beyond which the increases in the gap statistic are considered insignificant (Figure \@ref(fig:kmeans-gap)).
+It must be said, though, that this process is time-consuming and the resulting choice of $k$ is not always stable.
+
+```{r kmeans-gap, fig.cap="Gap statistic with respect to increasing number of $k$-means clusters in the 10X PBMC dataset. The red line represents the chosen $k$."}
+library(cluster)
+set.seed(110010101)
+gaps <- clusGap(reducedDim(sce.pbmc, "PCA"), kmeans, K.max=20)
+best.k <- maxSE(gaps$Tab[,"gap"], gaps$Tab[,"SE.sim"])
+best.k
+
+plot(gaps$Tab[,"gap"], xlab="Number of clusters", ylab="Gap statistic")
+abline(v=best.k, col="red")
+```
+
+```{r, echo=FALSE}
+# Check that the results are reasonable, as sometimes
+# the gap statistic gets funny stochastic results.
+stopifnot(identical(best.k, 8L))
+```
+
+A more practical use of $k$-means is to deliberately set $k$ to a large value to achieve overclustering.
+This will forcibly partition cells inside broad clusters that do not have well-defined internal structure.
+For example, we might be interested in the change in expression from one "side" of a cluster to the other, but the lack of any clear separation within the cluster makes it difficult to separate with graph-based methods, even at the highest resolution.
+$k$-means has no such problems and will readily split these broad clusters for greater resolution, though obviously one must be prepared for the additional work involved in interpreting a greater number of clusters.
+
+```{r tsne-clust-kmeans-best, fig.cap="$t$-SNE plot of the 10X PBMC dataset, where each point represents a cell and is coloured according to the identity of the assigned cluster from $k$-means clustering with $k=20$."}
+set.seed(100)
+clust.kmeans2 <- kmeans(reducedDim(sce.pbmc, "PCA"), centers=20)
+table(clust.kmeans2$cluster)
+
+colLabels(sce.pbmc) <- factor(clust.kmeans2$cluster)
+plotTSNE(sce.pbmc, colour_by="label", text_by="label")
+```
+
+As an aside: if we were already using `clusterRows()` from `r Biocpkg("bluster")`, we can easily switch to $k$-means clustering by supplying a `KmeansParam()` as the second argument.
+This requires the number of clusters as a fixed integer or as a function of the number of cells - the example below sets the number of clusters to the square root of the number of cells, which is an effective rule-of-thumb for vector quantization. 
+
+```{r}
+set.seed(10000)
+sq.clusts <- clusterRows(reducedDim(sce.pbmc, "PCA"), KmeansParam(centers=sqrt))
+nlevels(sq.clusts)
+```
+
+### Assessing cluster separation
+
+The within-cluster sum of squares (WCSS) for each cluster is the most relevant diagnostic for $k$-means, given that the algorithm aims to find a clustering that minimizes the WCSS.
+Specifically, we use the WCSS to compute the root-mean-squared deviation (RMSD) that represents the spread of cells within each cluster.
+A cluster is more likely to have a low RMSD if it has no internal structure and is separated from other clusters (such that there are not many cells on the boundaries between clusters, which would result in a higher sum of squares from the centroid).
+
+```{r}
+ncells <- tabulate(clust.kmeans2$cluster)
+tab <- data.frame(wcss=clust.kmeans2$withinss, ncells=ncells)
+tab$rms <- sqrt(tab$wcss/tab$ncells)
+tab
+```
+
+(As an aside, the RMSDs of the clusters are poorly correlated with their sizes in Figure \@ref(fig:tsne-clust-kmeans-best).
+This highlights the risks of attempting to quantitatively interpret the sizes of visual clusters in $t$-SNE plots.)
+
+To explore the relationships between $k$-means clusters, a natural approach is to compute distances between their centroids.
+This directly lends itself to visualization as a tree after hierarchical clustering (Figure \@ref(fig:kmeans-tree)). 
+
+```{r kmeans-tree, fig.cap="Hierarchy of $k$-means cluster centroids, using Ward's minimum variance method."}
+cent.tree <- hclust(dist(clust.kmeans2$centers), "ward.D2")
+plot(cent.tree)
+```
+
+### In two-step procedures
+
+As previously mentioned, $k$-means is most effective in its role of vector quantization, i.e., compressing adjacent cells into a single representative point.
+This allows $k$-means to be used as a prelude to more sophisticated and interpretable - but expensive - clustering algorithms.
+The `clusterRows()` function supports a "two-step" mode where $k$-means is initially used to obtain representative centroids that are subjected to graph-based clustering.
+Each cell is then placed in the same graph-based cluster that its $k$-means centroid was assigned to (Figure \@ref(fig:tsne-kmeans-graph-pbmc)).
+
+```{r tsne-kmeans-graph-pbmc, fig.cap="$t$-SNE plot of the PBMC dataset, where each point represents a cell and is coloured according to the identity of the assigned cluster from combined $k$-means/graph-based clustering."}
+# Setting the seed due to the randomness of k-means.
+set.seed(0101010)
+kgraph.clusters <- clusterRows(reducedDim(sce.pbmc, "PCA"),
+    TwoStepParam(
+        first=KmeansParam(centers=1000),
+        second=NNGraphParam(k=5)
+    )
+)
+table(kgraph.clusters)
+
+plotTSNE(sce.pbmc, colour_by=I(kgraph.clusters))
+```
+
+The obvious benefit of this approach over direct graph-based clustering is the speed improvement.
+We avoid the need to identifying nearest neighbors for each cell and the construction of a large intermediate graph,
+while benefiting from the relative interpretability of graph-based clusters compared to those from $k$-means.
+This approach also mitigates the "inflation" effect discussed in Section \@ref(clustering-graph).
+Each centroid serves as a representative of a region of space that is roughly similar in volume,
+ameliorating differences in cell density that can cause (potentially undesirable) differences in resolution.
+
+The choice of the number of $k$-means clusters (defined here by the `kmeans.clusters=` argument) determines the trade-off between speed and fidelity.
+Larger values provide a more faithful representation of the underlying distribution of cells,
+at the cost of requiring more computational work by the second-stage clustering procedure.
+Note that the second step operates on the centroids, so increasing `kmeans.clusters=` may have further implications if the second-stage procedure is sensitive to the total number of input observations. 
+For example, increasing the number of centroids would require an concomitant increase in `k=` (the number of neighbors in graph construction) to maintain the same level of resolution in the final output.
+
+## Hierarchical clustering
+
+### Background
+
+Hierarchical clustering is an ancient technique that aims to generate a dendrogram containing a hierarchy of samples.
+This is most commonly done by greedily agglomerating samples into clusters, then agglomerating those clusters into larger clusters, and so on until all samples belong to a single cluster. 
+Variants of hierarchical clustering methods primarily differ in how they choose to perform the agglomerations.
+For example, complete linkage aims to merge clusters with the smallest maximum distance between their elements, while Ward's method aims to minimize the increase in within-cluster variance.
+
+In the context of scRNA-seq, the main advantage of hierarchical clustering lies in the production of the dendrogram.
+This is a rich summary that describes the relationships between cells and subpopulations at various resolutions and in a quantitative manner based on the branch lengths.
+Users can easily "cut" the tree at different heights to define clusters with different granularity, where clusters defined at high resolution are guaranteed to be nested within those defined at a lower resolution.
+(Guaranteed nesting can be helpful for interpretation, as discussed in Section \@ref(subclustering).)
+The dendrogram is also a natural representation of the data in situations where cells have descended from a relatively recent common ancestor.
+
+In practice, hierachical clustering is too slow to be used for anything but the smallest scRNA-seq datasets.
+Most variants require a cell-cell distance matrix that is prohibitively expensive to compute for many cells.
+Greedy agglomeration is also likely to result in a quantitatively suboptimal partitioning (as defined by the agglomeration measure) at higher levels of the dendrogram when the number of cells and merge steps is high.
+Nonetheless, we will still demonstrate the application of hierarchical clustering here, as it can occasionally be useful for squeezing more information out of datasets with very few cells.
+
+### Implementation
+
+As the PBMC dataset is too large, we will demonstrate on the 416B dataset instead.
+
+```{r, results='asis', echo=FALSE}
+extractCached("lun-416b.Rmd", "dimensionality-reduction", "sce.416b")
+```
+
+```{r}
+sce.416b
+```
+
+We compute a cell-cell distance matrix using the top PCs and we apply hierarchical clustering with Ward's method.
+The resulting tree in Figure \@ref(fig:dend-416b) shows a clear split in the population caused by oncogene induction. 
+While both Ward's method and complete linkage (`hclust()`'s default) yield compact clusters, we prefer the former it is less affected by differences in variance between clusters.
+
+```{r dend-416b, fig.cap="Hierarchy of cells in the 416B data set after hierarchical clustering, where each leaf node is a cell that is coloured according to its oncogene induction status (red is induced, blue is control) and plate of origin (light or dark)."}
+dist.416b <- dist(reducedDim(sce.416b, "PCA"))
+tree.416b <- hclust(dist.416b, "ward.D2")
+
+# Making a prettier dendrogram.
+library(dendextend)
+tree.416b$labels <- seq_along(tree.416b$labels)
+dend <- as.dendrogram(tree.416b, hang=0.1)
+
+combined.fac <- paste0(sce.416b$block, ".", 
+    sub(" .*", "", sce.416b$phenotype))
+labels_colors(dend) <- c(
+    `20160113.wild`="blue",
+    `20160113.induced`="red",
+    `20160325.wild`="dodgerblue",
+    `20160325.induced`="salmon"
+)[combined.fac][order.dendrogram(dend)]
+
+plot(dend)
+```
+
+```{r, echo=FALSE, results="hide", fig.show="hide"}
+set.seed(999)
+
+# For contributors who don't believe me, try this out.
+# Good luck trying to get a single cut that gets all three
+# clusters out with cutree!
+a1 <- matrix(rnorm(5000, 4, sd=2), ncol=10)
+a2 <- matrix(rnorm(5000, 2, sd=1.5), ncol=10)
+a3 <- matrix(rnorm(5000, 0, sd=1), ncol=10)
+x <- rbind(a1, a2, a3)
+
+dist.sim <- dist(x)
+tree.sim <- hclust(dist.sim, "ward.D2")
+tree.sim2 <- hclust(dist.sim)
+dend.sim <- as.dendrogram(tree.sim)
+dend.sim2 <- as.dendrogram(tree.sim2)
+
+cluster <- rep(1:3, each=500)
+labels_colors(dend.sim) <- c("blue", "red", "darkgreen")[cluster][order.dendrogram(dend.sim)]
+labels_colors(dend.sim2) <- c("blue", "red", "darkgreen")[cluster][order.dendrogram(dend.sim2)]
+
+par(mfrow=c(1,2))
+plot(dend.sim)
+plot(dend.sim2)
+
+table(cluster, 
+    dynamicTreeCut::cutreeDynamic(tree.sim, distM=as.matrix(dist.sim),
+    minClusterSize=10))
+table(cluster, 
+    dynamicTreeCut::cutreeDynamic(tree.sim2, distM=as.matrix(dist.sim),
+        minClusterSize=10))
+```
+
+To obtain explicit clusters, we "cut" the tree by removing internal branches such that every subtree represents a distinct cluster.
+This is most simply done by removing internal branches above a certain height of the tree, as performed by the `cutree()` function.
+A more sophisticated variant of this approach is implemented in the `r CRANpkg("dynamicTreeCut")` package,
+which uses the shape of the branches to obtain a better partitioning for complex dendrograms (Figure \@ref(fig:dend-cluster)).
+
+```{r dend-cluster, fig.cap="Hierarchy of cells in the 416B data set after hierarchical clustering, where each leaf node is a cell that is coloured according to its assigned cluster identity from a dynamic tree cut."}
+library(dynamicTreeCut)
+
+# minClusterSize needs to be turned down for small datasets.
+# deepSplit controls the resolution of the partitioning.
+clust.416b <- cutreeDynamic(tree.416b, distM=as.matrix(dist.416b),
+    minClusterSize=10, deepSplit=1)
+table(clust.416b)
+
+labels_colors(dend) <- clust.416b[order.dendrogram(dend)]
+plot(dend)
+```
+
+This generally corresponds well to the grouping of cells on a $t$-SNE plot (Figure \@ref(fig:tsne-416b)).
+The exception is cluster 2, which is split across two visual clusters in the plot.
+We attribute this to a distortion introduced by $t$-SNE rather than inappropriate behavior of the clustering algorithm, based on the examination of some later diagnostics.
+
+```{r tsne-416b, fig.cap="$t$-SNE plot of the 416B dataset, where each point represents a cell and is coloured according to the identity of the assigned cluster from hierarchical clustering."}
+colLabels(sce.416b) <- factor(clust.416b)
+plotReducedDim(sce.416b, "TSNE", colour_by="label")
+```
+
+```{r, echo=FALSE}
+fault <- 2L
+visual <- kmeans(reducedDim(sce.416b, "TSNE"), 4)
+xtab <- table(colLabels(sce.416b), visual$cluster)
+stopifnot(sum(xtab[fault,] > 0) == 2)
+stopifnot(sum(xtab[fault,]==0) == 2)
+```
+
+Note that the series of calls required to obtain the clusters is also wrapped by `clusterRows()` for more convenient execution.
+In this case, we can reproduce `clust.416b` with the following:
+
+```{r}
+clust.416b.again <- clusterRows(reducedDim(sce.416b, "PCA"), 
+    HclustParam(method="ward.D2", cut.dynamic=TRUE, minClusterSize=10, deepSplit=1))
+table(clust.416b.again)
+```
+
+```{r, echo=FALSE}
+stopifnot(identical(
+    factor(unname(clust.416b)),
+    factor(clust.416b.again)
+))
+```
+
+### Assessing cluster separation {#silhouette-width}
+
+We check the separation of the clusters using the silhouette width (Figure \@ref(fig:silhouette416b)).
+For each cell, we compute the average distance to all cells in the same cluster.
+We also compute the average distance to all cells in another cluster, taking the minimum of the averages across all other clusters.
+The silhouette width for each cell is defined as the difference between these two values divided by their maximum.
+Cells with large positive silhouette widths are closer to other cells in the same cluster than to cells in different clusters.
+
+Each cluster would ideally contain large positive silhouette widths, indicating that it is well-separated from other clusters.
+This is indeed the case in Figure \@ref(fig:silhouette416b) - and in fact, cluster 2 has the largest width of all, indicating that it is a more coherent cluster than portrayed in Figure \@ref(fig:tsne-416b).
+Smaller widths can arise from the presence of internal subclusters, which inflates the within-cluster distance; or overclustering, where cells at the boundary of a partition are closer to the neighboring cluster than their own cluster.
+
+```{r silhouette416b, fig.cap="Silhouette widths for cells in each cluster in the 416B dataset. Each bar represents a cell, grouped by the cluster to which it is assigned."}
+sil <- silhouette(clust.416b, dist = dist.416b)
+plot(sil)
+```
+
+```{r, echo=FALSE}
+stopifnot(which.max(vapply(split(sil[,3], sil[,1]), mean, 0))==fault)
+```
+
+For a more detailed examination, we identify the closest neighboring cluster for cells with negative widths.
+This provides a perspective on the relationships between clusters that is closer to the raw data than the dendrogram in Figure \@ref(fig:dend-cluster).
+
+```{r}
+neg.widths <- sil[,3] < 0
+table(Cluster=sil[neg.widths,1], Neighbor=sil[neg.widths,2])
+```
+
+The average silhouette width across all cells can also be used to choose clustering parameters.
+The aim is to maximize the average silhouette width in order to obtain well-separated clusters.
+This can be helpful to automatically obtain a "reasonable" clustering, though in practice, the clustering that yields the strongest separation often does not provide the most biological insight.
+
+## General-purpose cluster diagnostics
+
+### Cluster separation, redux
+
+We previously introduced the silhouette width in the context of hierarchical clustering (Section \@ref(silhouette-width)).
+While this can be applied with other clustering algorithms, 
+it requires calculation of all pairwise distances between cells and is not scalable for larger cdatasets.
+In such cases, we instead use an approximate approach that replaces the average of the distances with the distance to the average (i.e., centroid) of each cluster, with some tweaks to account for the distance due to the within-cluster variance.
+This is implemented in the `approxSilhouette()` function from `r Biocpkg("bluster")`,
+allowing us to quickly identify poorly separate clusters with mostly negative widths (Figure \@ref(fig:pbmc-silhouette)).
+
+```{r pbmc-silhouette, fig.wide=TRUE, fig.cap="Distribution of the approximate silhouette width across cells in each cluster of the PBMC dataset. Each point represents a cell and colored with the identity of its own cluster if its silhouette width is positive and that of the closest other cluster if the width is negative."}
+# Performing the calculations on the PC coordinates, like before.
+sil.approx <- approxSilhouette(reducedDim(sce.pbmc, "PCA"), clusters=clust)
+
+sil.data <- as.data.frame(sil.approx)
+sil.data$closest <- factor(ifelse(sil.data$width > 0, clust, sil.data$other))
+sil.data$cluster <- factor(clust)
+
+ggplot(sil.data, aes(x=cluster, y=width, colour=closest)) + 
+    ggbeeswarm::geom_quasirandom(method="smiley")
+```
+
+Alternatively, we can quantify the degree to which cells from multiple clusters intermingle in expression space.
+The "clustering purity" is defined for each cell as the proportion of neighboring cells that are assigned to the same cluster.
+Well-separated clusters should exhibit little intermingling and thus high purity values for all member cells,
+as demonstrated below in Figure \@ref(fig:pbmc-box-purities).
+Median purity values are consistently greater than 0.9,
+indicating that most cells in each cluster are primarily surrounded by other cells from the same cluster.
+
+```{r pbmc-box-purities, fig.wide=TRUE, fig.cap="Distribution of cluster purities across cells in each cluster of the PBMC dataset. Each point represents a cell and colored with the identity of the cluster contributing the largest proportion of its neighbors."}
+pure.pbmc <- neighborPurity(reducedDim(sce.pbmc, "PCA"), clusters=clust)
+
+pure.data <- as.data.frame(pure.pbmc)
+pure.data$maximum <- factor(pure.data$maximum)
+pure.data$cluster <- factor(clust)
+
+ggplot(pure.data, aes(x=cluster, y=purity, colour=maximum)) +
+    ggbeeswarm::geom_quasirandom(method="smiley")
+```
+
+```{r, echo=FALSE}
+by.cluster <- split(pure.pbmc$purity, clust)
+med.by.clust <- vapply(by.cluster, median, 0)
+stopifnot(all(med.by.clust > 0.9))
+```
+
+The main difference between these two methods is that the purity is ignorant of the intra-cluster variance.
+This may or may not be desirable depending on what level of heterogeneity is of interest.
+In addition, the purity will - on average - only decrease with increasing cluster number/resolution,
+making it less effective for choosing between different clusterings.
+However, regardless of the chosen method, it is worth keeping in mind that poor separation is not synonymous with poor quality. 
+In fact, poorly separated clusters will often be observed in non-trivial analyses of scRNA-seq data 
+where the aim is to characterize closely related subtypes or states.
+These diagnostics are best used to guide interpretation by highlighting clusters that require more investigation
+rather than to rule out poorly separated clusters altogether. 
+
+### Comparing different clusterings
+
+As previously mentioned, clustering's main purpose is to obtain a discrete summary of the data for further interpretation.
+The diversity of available methods (and the subsequent variation in the clustering results)
+reflects the many different "perspectives" that can be derived from a high-dimensional scRNA-seq dataset.
+It is helpful to determine how these perspectives relate to each other by comparing the clustering results.
+More concretely, we want to know which clusters map to each other across algorithms;
+inconsistencies may be indicative of complex variation that is summarized differently by each clustering procedure.
+
+A simple yet effective approach for comparing two clusterings of the same dataset
+is to create a 2-dimensional table of label frequencies (Figure \@ref(fig:walktrap-v-others)).
+We can further improve the interpretability of this table by computing the proportions of cell assignments,
+which avoids difficulties with dynamic range when visualizing clusters of differing abundances,
+For example, we may be interested in how our Walktrap clusters from Section \@ref(clustering-graph)
+are redistributed when we switch to using Louvain community detection (Figure \@ref(fig:walktrap-v-louvain-prop)).
+Note that this heatmap is best interpreted on a row-by-row basis as the proportions are computed within each row
+and cannot be easily compared between rows.
+
+<!--
+No point interpreting it by column, as you'd get multiple 100% values.
+An entry with a larger proportion may have a lower number of cells along a column.
+-->
+
+```{r walktrap-v-louvain-prop, fig.cap="Heatmap of the proportions of cells from each Walktrap cluster (rows) across the Louvain clusters (columns) in the PBMC dataset."}
+tab <- table(Walktrap=clust, Louvain=clust.louvain)
+tab <- tab/rowSums(tab)
+pheatmap(tab, color=viridis::viridis(100), cluster_cols=FALSE, cluster_rows=FALSE)
+```
+
+For clusterings that differ primarily in resolution (usually from different parameterizations of the same algorithm),
+we can use the `r CRANpkg("clustree")` package to visualize the relationships between them.
+Here, the aim is to capture the redistribution of cells from one clustering to another at progressively higher resolution, 
+providing a convenient depiction of how clusters split apart (Figure \@ref(fig:walktrap-res-clustree)).
+This approach is most effective when the clusterings exhibit a clear gradation in resolution
+but is less useful for comparisons involving theoretically distinct clustering procedures.
+
+```{r walktrap-res-clustree, fig.wide=TRUE, fig.width=10, fig.height=5, fig.cap="Graph of the relationships between the Walktrap clusterings of the PBMC dataset, generated with varying $k$ during the nearest-neighbor graph construction. (A higher $k$ generally corresponds to a lower resolution clustering.) The size of the nodes is proportional to the number of cells in each cluster, and the edges depict cells in one cluster that are reassigned to another cluster at a different resolution. The color of the edges is defined according to the number of reassigned cells and the opacity is defined from the corresponding proportion relative to the size of the lower-resolution cluster."}
+library(clustree)
+combined <- cbind(k.50=clust.50, k.10=clust, k.5=clust.5)
+clustree(combined, prefix="k.", edge_arrow=FALSE)
+```
+
+We can quantify the agreement between two clusterings by computing the Rand index with `r Biocpkg("bluster")`'s `pairwiseRand()`.
+This is defined as the proportion of pairs of cells that retain the same status
+(i.e., both cells in the same cluster, or each cell in different clusters) in both clusterings.
+In practice, we usually compute the adjusted Rand index (ARI)
+where we subtract the number of concordant pairs expected under random permutations of the clusterings;
+this accounts for differences in the size and number of clusters within and between clusterings.
+A larger ARI indicates that the clusters are preserved, up to a maximum value of 1 for identical clusterings.
+
+```{r}
+pairwiseRand(clust, clust.5, mode="index") 
+```
+
+The same function can also provide a more granular perspective with `mode="ratio"`,
+where the ARI is broken down into its contributions from each pair of clusters in one of the clusterings.
+This mode is helpful if one of the clusterings - in this case, `clust` - is considered to be a "reference",
+and the aim is to quantify the extent to which the reference clusters retain their integrity in another clustering.
+In the `breakdown` matrix, each entry is a ratio of the adjusted number of concoordant pairs to the adjusted total number of pairs.
+Low values on the diagonal in Figure \@ref(fig:pbmc-rand-breakdown) indicate that cells from the corresponding reference cluster in `clust` are redistributed to multiple other clusters in `clust.5`. 
+Conversely, low off-diagonal values indicate that the corresponding pair of reference clusters are merged together in `clust.5`.
+
+```{r pbmc-rand-breakdown, fig.cap="ARI-based ratio for each pair of clusters in the reference Walktrap clustering compared to a higher-resolution alternative clustering for the PBMC dataset. Rows and columns of the heatmap represent clusters in the reference clustering. Each entry represents the proportion of pairs of cells involving the row/column clusters that retain the same status in the alternative clustering."}
+breakdown <- pairwiseRand(ref=clust, alt=clust.5, mode="ratio") 
+pheatmap(breakdown, color=viridis::magma(100), 
+    cluster_rows=FALSE, cluster_cols=FALSE)
+```
+
+### Evaluating cluster stability {#cluster-bootstrapping}
+
+A desirable property of a given clustering is that it is stable to perturbations to the input data [@luxburg2010clustering].
+Stable clusters are logistically convenient as small changes to upstream processing will not change the conclusions;
+greater stability also increases the likelihood that those conclusions can be reproduced in an independent replicate study.
+`r Biocpkg("scran")` uses bootstrapping to evaluate the stability of a clustering algorithm on a given dataset - that is, cells are sampled with replacement to create a "bootstrap replicate" dataset, and clustering is repeated on this replicate to see if the same clusters can be reproduced.
+We demonstrate below for graph-based clustering on the PCs of the PBMC dataset.
+
+```{r}
+myClusterFUN <- function(x) {
+    g <- bluster::makeSNNGraph(x, type="jaccard")
+    igraph::cluster_louvain(g)$membership
+}
+
+pcs <- reducedDim(sce.pbmc, "PCA")
+originals <- myClusterFUN(pcs)
+table(originals) # inspecting the cluster sizes.
+
+set.seed(0010010100)
+ratios <- bootstrapStability(pcs, FUN=myClusterFUN, clusters=originals)
+dim(ratios)
+```
+
+The function returns a matrix of ARI-derived ratios for every pair of original clusters in `originals` (Figure \@ref(fig:bootstrap-matrix)), averaged across bootstrap iterations.
+High ratios indicate that the clustering in the bootstrap replicates are highly consistent with that of the original dataset.
+More specifically, high ratios on the diagonal indicate that cells in the same original cluster are still together in the bootstrap replicates, while high ratios off the diagonal indicate that cells in the corresponding cluster pair are still separted.
+
+```{r bootstrap-matrix, fig.cap="Heatmap of ARI-derived ratios from bootstrapping of graph-based clustering in the PBMC dataset. Each row and column represents an original cluster and each entry is colored according to the value of the ARI ratio between that pair of clusters."}
+pheatmap(ratios, cluster_row=FALSE, cluster_col=FALSE,
+    color=viridis::magma(100), breaks=seq(-1, 1, length.out=101))
+```
+
+Bootstrapping is a general approach for evaluating cluster stability that is compatible with any clustering algorithm.
+The ARI-derived ratio between cluster pairs is also more informative than a single stability measure for all/each cluster as the former considers the relationships between clusters, e.g., unstable separation between $X$ and $Y$ does not penalize the stability of separation between $X$ and another cluster $Z$.
+Of course, one should take these metrics with a grain of salt, as bootstrapping only considers the effect of sampling noise and ignores other factors that affect reproducibility in an independent study (e.g., batch effects, donor variation).
+In addition, it is possible for a poor separation to be highly stable, so highly stable cluster may not necessarily represent some distinct subpopulation.
+
+## Subclustering {#subclustering}
+
+Another simple approach to improving resolution is to repeat the feature selection and clustering _within_ a single cluster.
+This aims to select HVGs and PCs that are more relevant to internal structure, improving resolution by avoiding noise from unnecessary features.
+Subsetting also encourages clustering methods to separate cells according to more modest heterogeneity in the absence of distinct subpopulations.
+We demonstrate with a cluster of putative memory T cells from the PBMC dataset, identified according to several markers (Figure \@ref(fig:ccr7-dist-memory)).
+
+```{r ccr7-dist-memory, fig.cap="Distribution of log-normalized expression values for several T cell markers within each cluster in the 10X PBMC dataset. Each cluster is color-coded for convenience."}
+g.full <- buildSNNGraph(sce.pbmc, use.dimred = 'PCA')
+clust.full <- igraph::cluster_walktrap(g.full)$membership
+plotExpression(sce.pbmc, features=c("CD3E", "CCR7", "CD69", "CD44"),
+    x=I(factor(clust.full)), colour_by=I(factor(clust.full)))
+
+# Repeating modelling and PCA on the subset.
+memory <- 10L
+sce.memory <- sce.pbmc[,clust.full==memory]
+dec.memory <- modelGeneVar(sce.memory)
+sce.memory <- denoisePCA(sce.memory, technical=dec.memory,
+    subset.row=getTopHVGs(dec.memory, n=5000))
+```
+
+```{r, echo=FALSE}
+by.clust <- split(logcounts(sce.pbmc)["CCR7",], clust.full)
+by.clust.m <- vapply(by.clust, mean, 0)
+stopifnot(identical(unname(which.max(by.clust.m)), memory))
+```
+
+We apply graph-based clustering within this memory subset to obtain _CD4_^+^ and _CD8_^+^ subclusters (Figure \@ref(fig:cd48-memory-expression)).
+Admittedly, the expression of _CD4_ is so low that the change is rather modest, but the interpretation is clear enough.
+
+```{r cd48-memory-expression, fig.wide=TRUE, fig.asp=0.5, fig.cap="Distribution of _CD4_ and _CD8A_ log-normalized expression values within each cluster in the memory T cell subset of the 10X PBMC dataset."}
+g.memory <- buildSNNGraph(sce.memory, use.dimred="PCA")
+clust.memory <- igraph::cluster_walktrap(g.memory)$membership
+plotExpression(sce.memory, features=c("CD8A", "CD4"),
+    x=I(factor(clust.memory)))
+```
+
+```{r, echo=FALSE}
+by.clust <- split(logcounts(sce.memory)["CD8A",], clust.memory)
+by.clust.cd8 <- vapply(by.clust, mean, 0)
+top.cd8 <- which.max(by.clust.cd8)
+stopifnot(length(by.clust.cd8) == 2L, all(by.clust.cd8[top.cd8] > by.clust.cd8[-top.cd8] + 1))
+
+by.clust <- split(logcounts(sce.memory)["CD4",], clust.memory)
+by.clust.cd4 <- vapply(by.clust, mean, 0)
+stopifnot(length(by.clust.cd4) == 2L, identical(which.min(by.clust.cd4), top.cd8))
+```
+
+For subclustering analyses, it is helpful to define a customized function that calls our desired algorithms to obtain a clustering from a given `SingleCellExperiment`.
+This function can then be applied multiple times on different subsets without having to repeatedly copy and modify the code for each subset.
+For example, `quickSubCluster()` loops over all subsets and executes this user-specified function to generate a list of `SingleCellExperiment` objects containing the subclustering results.
+(Of course, the downside is that this assumes that a similar analysis is appropriate for each subset.
+If different subsets require extensive reparametrization, copying the code may actually be more straightforward.)
+
+```{r}
+set.seed(1000010)
+subcluster.out <- quickSubCluster(sce.pbmc, groups=clust.full,
+    prepFUN=function(x) { # Preparing the subsetted SCE for clustering.
+        dec <- modelGeneVar(x)
+        input <- denoisePCA(x, technical=dec,
+            subset.row=getTopHVGs(dec, prop=0.1),
+            BSPARAM=BiocSingular::IrlbaParam())
+    },
+    clusterFUN=function(x) { # Performing the subclustering in the subset.
+        g <- buildSNNGraph(x, use.dimred="PCA", k=20)
+        igraph::cluster_walktrap(g)$membership
+    }
+)
+
+# One SingleCellExperiment object per parent cluster:
+names(subcluster.out)
+
+# Looking at the subclustering for one example:
+table(subcluster.out[[1]]$subcluster)
+```
+
+Subclustering is a general and conceptually straightforward procedure for increasing resolution. 
+It can also simplify the interpretation of the subclusters, which only need to be considered in the context of the parent cluster's identity - for example, we did not have to re-identify the cells in cluster `r memory` as T cells.
+However, this is a double-edged sword as it is difficult for practitioners to consider the uncertainty of identification for parent clusters when working with deep nesting.
+If cell types or states span cluster boundaries, conditioning on the putative cell type identity of the parent cluster can encourage the construction of a "house of cards" of cell type assignments, e.g., where a subcluster of one parent cluster is actually contamination from a cell type in a separate parent cluster.
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

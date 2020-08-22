@@ -1,0 +1,132 @@
+# Pijuan-Sala chimeric mouse embryo (10X Genomics)
+
+```{r unref-setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble(cache=TRUE)
+```
+
+## Introduction
+
+This performs an analysis of the @pijuansala2019single dataset on mouse gastrulation.
+Here, we examine chimeric embryos at the E8.5 stage of development 
+where td-Tomato-positive embryonic stem cells (ESCs) were injected into a wild-type blastocyst.
+
+## Data loading
+
+```{r loading}
+library(MouseGastrulationData)
+sce.chimera <- WTChimeraData(samples=5:10)
+sce.chimera
+```
+
+```{r, echo=FALSE, results="hide"}
+gc()
+```
+
+```{r feature-annotation}
+library(scater)
+rownames(sce.chimera) <- uniquifyFeatureNames(
+    rowData(sce.chimera)$ENSEMBL, rowData(sce.chimera)$SYMBOL)
+```
+
+## Quality control
+
+Quality control on the cells has already been performed by the authors, so we will not repeat it here.
+We additionally remove cells that are labelled as stripped nuclei or doublets.
+
+```{r quality-control}
+drop <- sce.chimera$celltype.mapped %in% c("stripped", "Doublet")
+sce.chimera <- sce.chimera[,!drop]
+```
+
+## Normalization
+
+We use the pre-computed size factors in `sce.chimera`.
+
+```{r normalization}
+sce.chimera <- logNormCounts(sce.chimera)
+```
+
+## Variance modelling
+
+We retain all genes with any positive biological component, to preserve as much signal as possible across a very heterogeneous dataset.
+
+```{r variance-modelling}
+library(scran)
+dec.chimera <- modelGeneVar(sce.chimera, block=sce.chimera$sample)
+chosen.hvgs <- dec.chimera$bio > 0
+```
+
+```{r unref-pijuan-var, fig.asp=0.5, fig.wide=TRUE, fig.cap="Per-gene variance as a function of the mean for the log-expression values in the Pijuan-Sala chimeric mouse embryo dataset. Each point represents a gene (black) with the mean-variance trend (blue) fitted to the variances."}
+par(mfrow=c(1,2))
+blocked.stats <- dec.chimera$per.block
+for (i in colnames(blocked.stats)) {
+    current <- blocked.stats[[i]]
+    plot(current$mean, current$total, main=i, pch=16, cex=0.5,
+        xlab="Mean of log-expression", ylab="Variance of log-expression")
+    curfit <- metadata(current)
+    curve(curfit$trend(x), col='dodgerblue', add=TRUE, lwd=2)
+}
+```
+
+## Merging
+
+We use a hierarchical merge to first merge together replicates with the same genotype, 
+and then merge samples across different genotypes.
+
+```{r merging}
+library(batchelor)
+set.seed(01001001)
+merged <- correctExperiments(sce.chimera, 
+    batch=sce.chimera$sample, 
+    subset.row=chosen.hvgs,
+    PARAM=FastMnnParam(
+        merge.order=list(
+            list(1,3,5), # WT (3 replicates)
+            list(2,4,6)  # td-Tomato (3 replicates)
+        )
+    )
+)
+```
+
+We use the percentage of variance lost as a diagnostic:
+
+```{r}
+metadata(merged)$merge.info$lost.var
+```
+
+## Clustering
+
+```{r clustering}
+g <- buildSNNGraph(merged, use.dimred="corrected")
+clusters <- igraph::cluster_louvain(g)
+colLabels(merged) <- factor(clusters$membership)
+```
+
+We examine the distribution of cells across clusters and samples.
+
+```{r}
+table(Cluster=colLabels(merged), Sample=merged$sample)
+```
+
+## Dimensionality reduction
+
+We use an external algorithm to compute nearest neighbors for greater speed.
+
+```{r dimensionality-reduction, cache=TRUE, cache.lazy=TRUE}
+merged <- runTSNE(merged, dimred="corrected", external_neighbors=TRUE)
+merged <- runUMAP(merged, dimred="corrected", external_neighbors=TRUE)
+```
+
+```{r unref-pijuan-tsne, fig.asp=1.5, fig.cap="Obligatory $t$-SNE plots of the Pijuan-Sala chimeric mouse embryo dataset, where each point represents a cell and is colored according to the assigned cluster (top) or sample of origin (bottom)."}
+gridExtra::grid.arrange(
+    plotTSNE(merged, colour_by="label", text_by="label", text_col="red"),
+    plotTSNE(merged, colour_by="batch")
+)
+```
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

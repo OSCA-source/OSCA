@@ -1,0 +1,467 @@
+---
+output: html_document
+bibliography: ref.bib
+---
+
+# Feature selection 
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+## Motivation
+
+We often use scRNA-seq data in exploratory analyses to characterize heterogeneity across cells.
+Procedures like clustering and dimensionality reduction compare cells based on their gene expression profiles, which involves aggregating per-gene differences into a single (dis)similarity metric between a pair of cells.
+The choice of genes to use in this calculation has a major impact on the behavior of the metric and the performance of downstream methods.
+We want to select genes that contain useful information about the biology of the system while removing genes that contain random noise.
+This aims to preserve interesting biological structure without the variance that obscures that structure, and to reduce the size of the data to improve computational efficiency of later steps.
+
+The simplest approach to feature selection is to select the most variable genes based on their expression across the population.
+This assumes that genuine biological differences will manifest as increased variation in the affected genes, compared to other genes that are only affected by technical noise or a baseline level of "uninteresting" biological variation (e.g., from transcriptional bursting).
+Several methods are available to quantify the variation per gene and to select an appropriate set of highly variable genes (HVGs).
+We will discuss these below using the 10X PBMC dataset for demonstration:
+
+```{r, echo=FALSE, results="asis"}
+extractCached("tenx-unfiltered-pbmc4k.Rmd", "normalization", "sce.pbmc")
+```
+
+```{r}
+sce.pbmc
+```
+
+As well as the 416B dataset:
+
+```{r, echo=FALSE, results="asis"}
+extractCached("lun-416b.Rmd", "normalization", "sce.416b")
+```
+
+```{r}
+sce.416b
+```
+
+## Quantifying per-gene variation
+
+### Variance of the log-counts
+
+The simplest approach to quantifying per-gene variation is to simply compute the variance of the log-normalized expression values (referred to as "log-counts" for simplicity) for each gene across all cells in the population [@lun2016step].
+This has an advantage in that the feature selection is based on the same log-values that are used for later downstream steps.
+In particular, genes with the largest variances in log-values will contribute the most to the Euclidean distances between cells.
+By using log-values here, we ensure that our quantitative definition of heterogeneity is consistent throughout the entire analysis.
+
+Calculation of the per-gene variance is simple but feature selection requires modelling of the mean-variance relationship. 
+As discussed briefly in Section \@ref(normalization-transformation), the log-transformation does not achieve perfect variance stabilization, which means that the variance of a gene is driven more by its abundance than its underlying biological heterogeneity. 
+To account for this effect, we use the `modelGeneVar()` function to fit a trend to the variance with respect to abundance across all genes (Figure \@ref(fig:trend-plot-pbmc)).
+
+```{r trend-plot-pbmc, fig.cap="Variance in the PBMC data set as a function of the mean. Each point represents a gene while the blue line represents the trend fitted to all genes."}
+library(scran)
+dec.pbmc <- modelGeneVar(sce.pbmc)
+
+# Visualizing the fit:
+fit.pbmc <- metadata(dec.pbmc)
+plot(fit.pbmc$mean, fit.pbmc$var, xlab="Mean of log-expression",
+    ylab="Variance of log-expression")
+curve(fit.pbmc$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+```
+
+At any given abundance, we assume that the expression profiles of most genes are dominated by random technical noise (see Section \@ref(sec:spikeins) for details).
+Under this assumption, our trend represents an estimate of the technical noise as a function of abundance.
+We then break down the total variance of each gene into the technical component, i.e., the fitted value of the trend at that gene's abundance;
+and the biological component, defined as the difference between the total variance and the technical component.
+This biological component represents the "interesting" variation for each gene and can be used as the metric for HVG selection.
+
+```{r}
+# Ordering by most interesting genes for inspection.
+dec.pbmc[order(dec.pbmc$bio, decreasing=TRUE),] 
+```
+
+(Careful readers will notice that some genes have negative biological components, which have no obvious interpretation and can be ignored in most applications.
+They are inevitable when fitting a trend to the per-gene variances as approximately half of the genes will lie below the trend.)
+
+### Coefficient of variation
+
+An alternative approach to quantification uses the squared coefficient of variation (CV^2^) of the normalized expression values prior to log-transformation.
+The CV^2^ is a widely used metric for describing variation in non-negative data and is closely related to the dispersion parameter of the negative binomial distribution in packages like `r Biocpkg("edgeR")` and `r Biocpkg("DESeq2")`.
+We compute the CV^2^ for each gene in the PBMC dataset using the `modelGeneCV2()` function, which provides a robust implementation of the approach described by @brennecke2013accounting.
+
+```{r}
+dec.cv2.pbmc <- modelGeneCV2(sce.pbmc)
+```
+
+This allows us to model the mean-variance relationship when considering the relevance of each gene (Figure \@ref(fig:cv2-pbmc)).
+Again, our assumption is that most genes contain random noise and that the trend captures mostly technical variation.
+Large CV^2^ values that deviate strongly from the trend are likely to represent genes affected by biological structure.
+
+```{r cv2-pbmc, fig.cap="CV^2^ in the PBMC data set as a function of the mean. Each point represents a gene while the blue line represents the fitted trend."}
+fit.cv2.pbmc <- metadata(dec.cv2.pbmc)
+plot(fit.cv2.pbmc$mean, fit.cv2.pbmc$cv2, log="xy")
+curve(fit.cv2.pbmc$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+```
+
+For each gene, we quantify the deviation from the trend in terms of the ratio of its CV^2^ to the fitted value of trend at its abundance.
+This is more appropriate than the directly subtracting the trend from the CV^2^, as the magnitude of the ratio is not affected by the mean.
+
+```{r}
+dec.cv2.pbmc[order(dec.cv2.pbmc$ratio, decreasing=TRUE),]
+```
+
+Both the CV^2^ and the variance of log-counts are effective metrics for quantifying variation in gene expression.
+The CV^2^ tends to give higher rank to low-abundance HVGs driven by upregulation in rare subpopulations, for which the increase in variance on the raw scale is stronger than that on the log-scale.
+However, the variation described by the CV^2^ is less directly relevant to downstream procedures operating on the log-counts, and the reliance on the ratio can assign high rank to uninteresting genes with low absolute variance.
+We prefer the use of the variance of log-counts and will use it in the following sections 
+though many of the same principles apply to procedures based on the CV^2^.
+
+### Quantifying technical noise {#sec:spikeins}
+
+Strictly speaking, the use of a trend fitted to endogenous genes assumes that the expression profiles of most genes are dominated by random technical noise.
+In practice, all expressed genes will exhibit some non-zero level of biological variability due to events like transcriptional bursting.
+This suggests that our estimates of the technical component are likely to be inflated. 
+It would be more appropriate to consider these estimates as technical noise plus "uninteresting" biological variation, under the assumption that most genes are unaffected by the relevant heterogeneity in the population.
+
+This revised assumption is generally reasonable but may be problematic in some scenarios where many genes at a particular abundance are affected by a biological process.
+For example, strong upregulation of cell type-specific genes may result in an enrichment of HVGs at high abundances.
+This would inflate the fitted trend in that abundance interval and compromise the detection of the relevant genes.
+We can avoid this problem by fitting a mean-dependent trend to the variance of the spike-in transcripts (Figure \@ref(fig:spike-416b)), if they are available.
+The premise here is that spike-ins should not be affected by biological variation, so the fitted value of the spike-in trend should represent a better estimate of the technical component for each gene.
+
+```{r spike-416b, fig.cap="Variance in the 416B data set as a function of the mean. Each point represents a gene (black) or spike-in transcript (red) and the blue line represents the trend fitted to all spike-ins."}
+dec.spike.416b <- modelGeneVarWithSpikes(sce.416b, "ERCC")
+dec.spike.416b[order(dec.spike.416b$bio, decreasing=TRUE),]
+
+plot(dec.spike.416b$mean, dec.spike.416b$total, xlab="Mean of log-expression",
+    ylab="Variance of log-expression")
+fit.spike.416b <- metadata(dec.spike.416b)
+points(fit.spike.416b$mean, fit.spike.416b$var, col="red", pch=16)
+curve(fit.spike.416b$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+```
+
+In the absence of spike-in data, one can attempt to create a trend by making some distributional assumptions about the noise.
+For example, UMI counts typically exhibit near-Poisson variation if we only consider technical noise from library preparation and sequencing.
+This can be used to construct a mean-variance trend in the log-counts (Figure \@ref(fig:tech-pbmc)) with the `modelGeneVarByPoisson()` function.
+Note the increased residuals of the high-abundance genes, which can be interpreted as the amount of biological variation that was assumed to be "uninteresting" when fitting the gene-based trend in Figure \@ref(fig:trend-plot-pbmc).
+
+```{r tech-pbmc, fig.cap="Variance of normalized log-expression values for each gene in the PBMC dataset, plotted against the mean log-expression. The blue line represents represents the mean-variance relationship corresponding to Poisson noise."}
+set.seed(0010101)
+dec.pois.pbmc <- modelGeneVarByPoisson(sce.pbmc)
+dec.pois.pbmc <- dec.pois.pbmc[order(dec.pois.pbmc$bio, decreasing=TRUE),]
+head(dec.pois.pbmc)
+
+plot(dec.pois.pbmc$mean, dec.pois.pbmc$total, pch=16, xlab="Mean of log-expression",
+    ylab="Variance of log-expression")
+curve(metadata(dec.pois.pbmc)$trend(x), col="dodgerblue", add=TRUE)
+```
+
+Interestingly, trends based purely on technical noise tend to yield large biological components for highly-expressed genes.
+This often includes so-called "house-keeping" genes coding for essential cellular components such as ribosomal proteins, which are considered uninteresting for characterizing cellular heterogeneity.
+These observations suggest that a more accurate noise model does not necessarily yield a better ranking of HVGs, though one should keep an open mind - house-keeping genes are regularly DE in a variety of conditions [@glare2002betaactin;@nazari2015gapdh;@guimaraes2016patterns], and the fact that they have large biological components indicates that there is strong variation across cells that may not be completely irrelevant.
+
+### Accounting for blocking factors
+
+#### Fitting block-specific trends {#variance-batch}
+
+Data containing multiple batches will often exhibit batch effects (see Chapter \@ref(data-integration) for more details).
+We are usually not interested in HVGs that are driven by batch effects.
+Rather, we want to focus on genes that are highly variable within each batch.
+This is naturally achieved by performing trend fitting and variance decomposition separately for each batch.
+We demonstrate this approach by treating each plate (`block`) in the 416B dataset as a different batch, using the `modelGeneVarWithSpikes()` function.
+(The same argument is available in all other variance-modelling functions.)
+
+```{r}
+dec.block.416b <- modelGeneVarWithSpikes(sce.416b, "ERCC", block=sce.416b$block)
+head(dec.block.416b[order(dec.block.416b$bio, decreasing=TRUE),1:6])
+```
+
+The use of a batch-specific trend fit is useful as it accommodates differences in the mean-variance trends between batches.
+This is especially important if batches exhibit systematic technical differences, e.g., differences in coverage or in the amount of spike-in RNA added.
+In this case, there are only minor differences between the trends in Figure \@ref(fig:blocked-fit), which indicates that the experiment was tightly replicated across plates.
+The analysis of each plate yields estimates of the biological and technical components for each gene, which are averaged across plates to take advantage of information from multiple batches. 
+
+```{r blocked-fit, fig.asp=0.5, fig.width=10, fig.cap="Variance in the 416B data set as a function of the mean after blocking on the plate of origin. Each plot represents the results for a single plate, each point represents a gene (black) or spike-in transcript (red) and the blue line represents the trend fitted to all spike-ins."}
+par(mfrow=c(1,2))
+blocked.stats <- dec.block.416b$per.block
+for (i in colnames(blocked.stats)) {
+    current <- blocked.stats[[i]]
+    plot(current$mean, current$total, main=i, pch=16, cex=0.5,
+        xlab="Mean of log-expression", ylab="Variance of log-expression")
+    curfit <- metadata(current)
+    points(curfit$mean, curfit$var, col="red", pch=16)
+    curve(curfit$trend(x), col='dodgerblue', add=TRUE, lwd=2) 
+}
+```
+
+As an aside, the wave-like shape observed above is typical of the mean-variance trend for log-expression values.
+(The same wave is present but much less pronounced for UMI data.)
+A linear increase in the variance is observed as the mean increases from zero, as larger variances are obviously possible when the counts are not all equal to zero.
+In contrast, the relative contribution of sampling noise decreases at high abundances, resulting in a downward trend.
+The peak represents the point at which these two competing effects cancel each other out.
+
+#### Using a design matrix
+
+The use of block-specific trends is the recommended approach for experiments with a single blocking factor.
+However, this is not practical for studies involving a large number of blocking factors and/or covariates.
+In such cases, we can use the `design=` argument to specify a design matrix with uninteresting factors of variation.
+We illustrate again with the 416B data set, blocking on the plate of origin and oncogene induction.
+(The same argument is available in `modelGeneVar()` when spike-ins are not available.)
+
+```{r}
+design <- model.matrix(~factor(block) + phenotype, colData(sce.416b))
+dec.design.416b <- modelGeneVarWithSpikes(sce.416b, "ERCC", design=design)
+dec.design.416b[order(dec.design.416b$bio, decreasing=TRUE),]
+```
+
+This strategy is simple but somewhat inaccurate as it does not consider the mean expression in each blocking level.
+Recall that the technical component is estimated as the fitted value of the trend at the average abundance for each gene.
+However, the true technical component is the average of the fitted values at the per-block means, which may be quite different for strong batch effects and non-linear mean-variance relationships.
+The `block=` approach is safer and should be preferred in all situations where it is applicable.
+
+## Selecting highly variable genes {#hvg-selection}
+
+### Overview
+
+Once we have quantified the per-gene variation, the next step is to select the subset of HVGs to use in downstream analyses.
+A larger subset will reduce the risk of discarding interesting biological signal by retaining more potentially relevant genes, at the cost of increasing noise from irrelevant genes that might obscure said signal.
+It is difficult to determine the optimal trade-off for any given application as noise in one context may be useful signal in another.
+For example, heterogeneity in T cell activation responses is an interesting phenomena [@richard2018tcell] but may be irrelevant noise in studies that only care about distinguishing the major immunophenotypes.
+That said, there are several common strategies that are routinely used to guide HVG selection, which we shall discuss here.
+
+### Based on the largest metrics
+
+The simplest HVG selection strategy is to take the top $X$ genes with the largest values for the relevant variance metric.
+The main advantage of this approach is that the user can directly control the number of genes retained, which ensures that the computational complexity of downstream calculations is easily predicted.
+For `modelGeneVar()` and `modelGeneVarWithSpikes()`, we would select the genes with the largest biological components:
+
+```{r}
+# Taking the top 1000 genes here:
+hvg.pbmc.var <- getTopHVGs(dec.pbmc, n=1000)
+str(hvg.pbmc.var)
+```
+
+For `modelGeneCV2()` (and its relative, `modelGeneCV2WithSpikes()`), this would instead be the genes with the largest ratios:
+
+```{r}
+hvg.pbmc.cv2 <- getTopHVGs(dec.cv2.pbmc, var.field="ratio", n=1000)
+str(hvg.pbmc.cv2)
+```
+
+The choice of $X$ also has a fairly straightforward biological interpretation.
+Recall our trend-fitting assumption that most genes do not exhibit biological heterogeneity; this implies that they are not differentially expressed between cell types or states in our population.
+If we quantify this assumption into a statement that, e.g., no more than 5% of genes are differentially expressed, we can naturally set $X$ to 5% of the number of genes.
+In practice, we usually do not know the proportion of DE genes beforehand so this interpretation just exchanges one unknown for another.
+Nonetheless, it is still useful as it implies that we should lower $X$ for less heterogeneous datasets, retaining most of the biological signal without unnecessary noise from irrelevant genes.
+Conversely, more heterogeneous datasets should use larger values of $X$ to preserve secondary factors of variation beyond those driving the most obvious HVGs.
+
+The main disadvantage of this approach that it turns HVG selection into a competition between genes, whereby a subset of very highly variable genes can push other informative genes out of the top set.
+This can be problematic for analyses of highly heterogeneous populations if the loss of important markers prevents the resolution of certain subpopulations.
+In the most extreme example, consider a situation where a single subpopulation is very different from the others.
+In such cases, the top set will be dominated by differentially expressed genes involving that distinct subpopulation, compromising resolution of heterogeneity between the other populations.
+(This can salvaged with a nested analysis, as discussed in Section \@ref(subclustering), but we would prefer to avoid the problem in the first place.)
+
+<!--
+Similarly, abundance-dependent changes in the magnitude of the chosen variance metric can introduce unexpected biases in competitive gene selection. 
+For example, the wave shape in Figure \@ref(fig:blocked-fit) means that the largest biological components usually occur around the peak and will be preferentially selected, while an upper bound on the CV^2^ discriminates against selection of low-abundance genes.
+-->
+
+Another possible concern with this approach is the fact that the choice of $X$ is fairly arbitrary, with any value from 500 to 5000 considered "reasonable". 
+We have chosen $X=1000$ in the code above though there is no particular _a priori_ reason for doing so.
+Our recommendation is to simply pick an arbitrary $X$ and proceed with the rest of the analysis, with the intention of testing other choices later, rather than spending much time worrying about obtaining the "optimal" value.
+
+### Based on significance
+
+Another approach to feature selection is to set a fixed threshold of one of the metrics.
+This is most commonly done with the (adjusted) $p$-value reported by each of the above methods.
+The $p$-value for each gene is generated by testing against the null hypothesis that the variance is equal to the trend.
+For example, we might define our HVGs as all genes that have adjusted $p$-values below 0.05.
+
+```{r}
+hvg.pbmc.var.2 <- getTopHVGs(dec.pbmc, fdr.threshold=0.05)
+length(hvg.pbmc.var.2)
+```
+
+This approach is simple to implement and - if the test holds its size - it controls the false discovery rate (FDR).
+That is, it returns a subset of genes where the proportion of false positives is expected to be below the specified threshold.
+This can occasionally be useful in applications where the HVGs themselves are of interest.
+For example, if we were to use the list of HVGs in further experiments to verify the existence of heterogeneous expression for some of the genes, we would want to control the FDR in that list.
+
+The downside of this approach is that it is less predictable than the top $X$ strategy.
+The number of genes returned depends on the type II error rate of the test and the severity of the multiple testing correction.
+One might obtain no genes or every gene at a given FDR threshold, depending on the circumstances.
+Moreover, control of the FDR is usually not helpful at this stage of the analysis.
+We are not interpreting the individual HVGs themselves but are only using them for feature selection prior to downstream steps.
+There is no reason to think that a 5% threshold on the FDR yields a more suitable compromise between bias and noise compared to the top $X$ selection.
+
+As an aside, we might consider ranking genes by the $p$-value instead of the biological component for use in a top $X$ approach.
+This results in some counterintuitive behavior due to the nature of the underlying hypothesis test, which is based on the ratio of the total variance to the expected technical variance.
+Ranking based on $p$-value tends to prioritize HVGs that are more likely to be true positives but, at the same time, less likely to be biologically interesting.
+Many of the largest ratios are observed in high-abundance genes and are driven by very low technical variance; the total variance is typically modest for such genes, and they do not contribute much to population heterogeneity in absolute terms.
+(Note that the same can be said of the ratio of CV^2^ values, as briefly discussed above.)
+
+### Keeping all genes above the trend {#feature-selection-positive}
+
+Here, the aim is to only remove the obviously uninteresting genes with variances below the trend.
+By doing so, we avoid the need to make any judgement calls regarding what level of variation is interesting enough to retain.
+This approach represents one extreme of the bias-variance trade-off where bias is minimized at the cost of maximizing noise.
+For `modelGeneVar()`, it equates to keeping all positive biological components:
+
+```{r}
+hvg.pbmc.var.3 <- getTopHVGs(dec.pbmc, var.threshold=0)
+length(hvg.pbmc.var.3)
+```
+
+For `modelGeneCV2()`, this involves keeping all ratios above 1:
+
+```{r}
+hvg.pbmc.cv2.3 <- getTopHVGs(dec.cv2.pbmc, var.field="ratio", var.threshold=1)
+length(hvg.pbmc.cv2.3)
+```
+
+By retaining all potential biological signal, we give secondary population structure the chance to manifest.
+This is most useful for rare subpopulations where the relevant markers will not exhibit strong overdispersion owing to the small number of affected cells.
+It will also preserve a weak but consistent effect across many genes with small biological components; admittedly, though, this is not of major interest in most scRNA-seq studies given the difficulty of experimentally validating population structure in the absence of strong marker genes.
+
+The obvious cost is that more noise is also captured, which can reduce the resolution of otherwise well-separated populations and mask the secondary signal that we were trying to preserve.
+The use of more genes also introduces more computational work in each downstream step.
+This strategy is thus best suited to very heterogeneous populations containing many different cell types (possibly across many datasets that are to be merged, as in Chapter \@ref(integrating-datasets)) where there is a justified fear of ignoring marker genes for low-abundance subpopulations under a competitive top $X$ approach.
+
+## Selecting _a priori_ genes of interest {#apriori-hvgs}
+
+A blunt yet effective feature selection strategy is to use pre-defined sets of interesting genes.
+The aim is to focus on specific aspects of biological heterogeneity that may be masked by other factors when using unsupervised methods for HVG selection.
+One example application lies in the dissection of transcriptional changes during the earliest stages of cell fate commitment [@messmer2019transcriptional], which may be modest relative to activity in other pathways (e.g., cell cycle, metabolism).
+Indeed, if our aim is to show that there is no meaningful heterogeneity in a given pathway, we would - at the very least - be obliged to repeat our analysis using only the genes in that pathway to maximize power for detecting such heterogeneity.
+
+Using scRNA-seq data in this manner is conceptually equivalent to a fluorescence activated cell sorting (FACS) experiment, with the convenience of being able to (re)define the features of interest at any time.
+For example, in the PBMC dataset, we might use some of the C7 immunologic signatures from MSigDB [@godec2016compendium] to improve resolution of the various T cell subtypes.
+We stress that there is no shame in leveraging prior biological knowledge to address specific hypotheses in this manner.
+We say this because a common refrain in genomics is that the data analysis should be "unbiased", i.e., free from any biological preconceptions.
+Attempting to derive biological insight _ab initio_ is admirable but such "biases" are already present at every stage, starting from experimental design (why are we interested in this cell population in the first place?) and continuing through to interpretation of marker genes (Section \@ref(marker-detection)).
+
+```{r}
+library(msigdbr)
+c7.sets <- msigdbr(species = "Homo sapiens", category = "C7")
+head(unique(c7.sets$gs_name))
+
+# Using the Goldrath sets to distinguish CD8 subtypes
+cd8.sets <- c7.sets[grep("GOLDRATH", c7.sets$gs_name),]
+cd8.genes <- rowData(sce.pbmc)$Symbol %in% cd8.sets$human_gene_symbol
+summary(cd8.genes)
+
+# Using GSE11924 to distinguish between T helper subtypes
+th.sets <- c7.sets[grep("GSE11924", c7.sets$gs_name),]
+th.genes <- rowData(sce.pbmc)$Symbol %in% th.sets$human_gene_symbol
+summary(th.genes)
+
+# Using GSE11961 to distinguish between B cell subtypes
+b.sets <- c7.sets[grep("GSE11961", c7.sets$gs_name),]
+b.genes <- rowData(sce.pbmc)$Symbol %in% b.sets$human_gene_symbol
+summary(b.genes)
+```
+
+Of course, the downside of focusing on pre-defined genes is that it will limit our capacity to detect novel or unexpected aspects of variation.
+Thus, this kind of focused analysis should be complementary to (rather than a replacement for) the unsupervised feature selection strategies discussed previously.
+
+Alternatively, we can invert this reasoning to remove genes that are unlikely to be of interest prior to downstream analyses. 
+This eliminates unwanted variation that could mask relevant biology and interfere with interpretation of the results.
+Ribosomal protein genes or mitochondrial genes are common candidates for removal,
+especially in situations with varying levels of cell damage within a population.
+For immune cell subsets, we might also be inclined to remove immunoglobulin genes and T cell receptor genes 
+for which clonal expression introduces (possibly irrelevant) population structure.
+
+```{r}
+# Identifying ribosomal proteins:
+ribo.discard <- grepl("^RP[SL]\\d+", rownames(sce.pbmc))
+sum(ribo.discard)
+
+# A more curated approach for identifying ribosomal protein genes:
+c2.sets <- msigdbr(species = "Homo sapiens", category = "C2")
+ribo.set <- c2.sets[c2.sets$gs_name=="KEGG_RIBOSOME",]$human_gene_symbol
+ribo.discard <- rownames(sce.pbmc) %in% ribo.set
+sum(ribo.discard)
+
+library(AnnotationHub)
+edb <- AnnotationHub()[["AH73881"]]
+anno <- select(edb, keys=rowData(sce.pbmc)$ID, keytype="GENEID", 
+    columns="TXBIOTYPE")
+
+# Removing immunoglobulin variable chains:
+igv.set <- anno$GENEID[anno$TXBIOTYPE %in% c("IG_V_gene", "IG_V_pseudogene")]
+igv.discard <- rowData(sce.pbmc)$ID %in% igv.set
+sum(igv.discard)
+
+# Removing TCR variable chains:
+tcr.set <- anno$GENEID[anno$TXBIOTYPE %in% c("TR_V_gene", "TR_V_pseudogene")]
+tcr.discard <- rowData(sce.pbmc)$ID %in% tcr.set
+sum(tcr.discard)
+```
+
+In practice, we tend to err on the side of caution and abstain from preemptive filtering on biological function 
+until these genes are demonstrably problematic in downstream analyses.
+
+## Putting it all together {#feature-selection-subsetting}
+
+The few lines of code below will select the top 10% of genes with the highest biological components.
+
+```{r}
+dec.pbmc <- modelGeneVar(sce.pbmc)
+chosen <- getTopHVGs(dec.pbmc, prop=0.1)
+str(chosen)
+```
+
+We then have several options to enforce our HVG selection on the rest of the analysis.
+
+1. We can subset the `SingleCellExperiment` to only retain our selection of HVGs.
+This ensures that downstream methods will only use these genes for their calculations.
+The downside is that the non-HVGs are discarded from the new `SingleCellExperiment`, making it slightly more inconvenient to interrogate the full dataset for interesting genes that are not HVGs.
+
+    ```{r}
+    sce.pbmc.hvg <- sce.pbmc[chosen,]
+    dim(sce.pbmc.hvg)
+    ```
+
+2. We can keep the original `SingleCellExperiment` object and specify the genes to use for downstream functions via an extra argument like `subset.row=`.
+This is useful if the analysis uses multiple sets of HVGs at different steps, whereby one set of HVGs can be easily swapped for another in specific steps.
+
+    ```{r}
+    # Performing PCA only on the chosen HVGs.
+    library(scater)
+    sce.pbmc <- runPCA(sce.pbmc, subset_row=chosen)
+    reducedDimNames(sce.pbmc)
+    ```
+
+    This approach is facilitated by the `rowSubset()` utility,
+    which allows us to easily store one or more sets of interest in our `SingleCellExperiment`.
+    By doing so, we avoid the need to keep track of a separate `chosen` variable
+    and ensure that our HVG set is synchronized with any downstream row subsetting of `sce.pbmc`.
+
+    ```{r}
+    rowSubset(sce.pbmc) <- chosen # stored in the default 'subset'.
+    rowSubset(sce.pbmc, "HVGs.more") <- getTopHVGs(dec.pbmc, prop=0.2)
+    rowSubset(sce.pbmc, "HVGs.less") <- getTopHVGs(dec.pbmc, prop=0.3)
+    colnames(rowData(sce.pbmc))
+    ```
+
+    It can be inconvenient to repeatedly specify the desired feature set across steps,
+    so some downstream functions will automatically subset to the default `rowSubset()` if present in the `SingleCellExperiment`.
+    However, we find that it is generally safest to be explicit about which set is being used for a particular step.
+
+3. We can have our cake and eat it too by (ab)using the "alternative Experiment" system in the `SingleCellExperiment` class.
+Initially designed for storing alternative features like spike-ins or antibody tags, we can instead use it to hold our full dataset while we perform our downstream operations conveniently on the HVG subset.
+This avoids book-keeping problems in long analyses when the original dataset is not synchronized with the HVG subsetted data. 
+
+    ```{r}
+    # Recycling the class above.
+    altExp(sce.pbmc.hvg, "original") <- sce.pbmc
+    altExpNames(sce.pbmc.hvg)
+
+    # No need for explicit subset_row= specification in downstream operations.
+    sce.pbmc.hvg <- runPCA(sce.pbmc.hvg)
+
+    # Recover original data:
+    sce.pbmc.original <- altExp(sce.pbmc.hvg, "original", withColData=TRUE)
+    ```
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```
