@@ -1,4 +1,6 @@
-# You're probably at the wrong place!
+# If you're reading this...
+
+You're probably at the wrong place!
 
 If you're looking for the compiled book, go to https://osca.bioconductor.org.
 

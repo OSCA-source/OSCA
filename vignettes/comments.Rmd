@@ -16,7 +16,7 @@ output:
 This package exists only to compile the book on the Bioconductor build system.
 It does so by stuffing the book into a package to make it fit into the build system's package-oriented framework,
 with some additional tricks to coerce `R CMD build` to actually compile the book chapters.
-If you're looking at this vignette, you're probably trying to find something else:
+If you're reading this vignette, you're probably trying to find something else:
 
 - If you're looking for the compiled book itself, you should go to https://osca.bioconductor.org instead.
 The compiled development version of the book is at https://osca-dev.bioconductor.org.

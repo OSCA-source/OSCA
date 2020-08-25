@@ -1,6 +1,6 @@
-Package: OrchestratingSingleCellAnalysisBook
-Title: Compiling the OSCA Book on Bioconductor
-Version: 0.99.2
+Package: OrchestratingSingleCellAnalysisWrapper
+Title: Compilation Wrapper for the OSCA Book
+Version: 0.99.0
 Date: 2020-08-24
 Authors@R: person(role=c("aut", "cre"), "Aaron", "Lun", email = "infinite.monkeys.with.keyboards@gmail.com")
 Description: 
@@ -17,7 +17,7 @@ VignetteBuilder: knitr
 biocViews: ImmunoOncologyWorkflow, Workflow, SingleCellWorkflow
 Workflow: True
 NeedsCompilation: no
-URL: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis
+URL: https://github.com/LTLA/OrchestratingSingleCellAnalysisWrapper
 RoxygenNote: 7.1.0
 Imports: AnnotationHub,
   AUCell,
