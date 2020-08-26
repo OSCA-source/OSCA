@@ -363,6 +363,62 @@ However, there remains some room for difference between "optimal" and "useful";
 for example, noisy datasets may find themselves with very low $d$ as including more PCs will only ever increase reconstruction error, regardless of whether they contain relevant biological variation.
 This approach is also dependent on some strong i.i.d. assumptions about the noise matrix.
 
+## Count-based dimensionality reduction
+
+For count matrices, correspondence analysis (CA) is a natural approach to dimensionality reduction.
+In this procedure, we compute an expected value for each entry in the matrix based on the per-gene abundance and size factors. 
+Each count is converted into a standardized residual in a manner analogous to the calculation of the statistic in Pearson's chi-squared tests, i.e., subtraction of the expected value and division by its square root.
+An SVD is then applied on this matrix of residuals to obtain the necessary low-dimensional coordinates for each cell.
+To demonstrate, we use the `r Biocpkg("corral")` package to compute CA factors for the Zeisel dataset.
+
+```{r}
+library(corral)
+sce.corral <- corral_sce(sce.zeisel, subset_row=top.hvgs,
+   col.w=sizeFactors(sce.zeisel))
+dim(reducedDim(sce.corral, "corral"))
+```
+
+The major advantage of CA is that it avoids difficulties with the mean-variance relationship upon transformation (Section \@ref(normalization-transformation)).
+If two cells have the same expression profile but differences in their total counts, CA will return the same expected location for both cells; this avoids artifacts observed in PCA on log-transformed counts (Figure \@ref(fig:corral-sort)).
+However, CA is more sensitive to overdispersion in the random noise due to the nature of its standardization.
+This may cause some problems in some datasets where the CA factors may be driven by a few genes with random expression rather than the underlying biological structure. 
+
+```{r corral-sort, fig.width=10, fig.height=6, fig.cap="Dimensionality reduction results of all pool-and-split libraries in the SORT-seq CellBench data, computed by a PCA on the log-normalized expression values (left) or using the _corral_ package (right). Each point represents a library and is colored by the mixing ratio used to construct it."}
+# TODO: move to scRNAseq.
+library(BiocFileCache)
+bfc <- BiocFileCache(ask=FALSE)
+qcdata <- bfcrpath(bfc, "https://github.com/LuyiTian/CellBench_data/blob/master/data/mRNAmix_qc.RData?raw=true")
+
+env <- new.env()
+load(qcdata, envir=env)
+sce.8qc <- env$sce8_qc
+sce.8qc$mix <- factor(sce.8qc$mix)
+
+# Choosing some HVGs for PCA:
+sce.8qc <- logNormCounts(sce.8qc)
+dec.8qc <- modelGeneVar(sce.8qc)
+hvgs.8qc <- getTopHVGs(dec.8qc, n=1000)
+sce.8qc <- runPCA(sce.8qc, subset_row=hvgs.8qc)
+
+# By comparison, corral operates on the raw counts:
+sce.8qc <- corral_sce(sce.8qc, subset_row=hvgs.8qc, col.w=sizeFactors(sce.8qc))
+
+gridExtra::grid.arrange(
+    plotPCA(sce.8qc, colour_by="mix") + ggtitle("PCA"),
+    plotReducedDim(sce.8qc, "corral", colour_by="mix") + ggtitle("corral"),
+    ncol=2
+)
+```
+
+```{r, echo=FALSE, eval=FALSE}
+# You can see how it is driven by a single overdispersed gene.
+library(corral)
+y <- matrix(rpois(100000, lambda=5), ncol=1000)
+y <- rbind(y, rnbinom(ncol(y), mu=100, size=10))
+out <- corral(y)
+plot(out$PCv[,1], out$PCv[,2], col=topo.colors(10)[cut(log1p(y[101,]), 10)], pch=16)
+```
+
 <!--
 ## Non-negative matrix factorization
 
