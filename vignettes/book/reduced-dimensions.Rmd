@@ -569,7 +569,7 @@ sce.zeisel <- runTSNE(sce.zeisel, dimred="PCA", perplexity=80)
 out80 <- plotReducedDim(sce.zeisel, dimred="TSNE", 
     colour_by="level1class") + ggtitle("perplexity = 80")
 
-multiplot(out5, out20, out80, cols=3)
+gridExtra::grid.arrange(out5, out20, out80, ncol=3)
 ```
 
 Finally, it is tempting to interpret the $t$-SNE results as a "map" of single-cell identities.

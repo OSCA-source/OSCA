@@ -1,11 +1,11 @@
 # (PART) Preamble {-}
 
+# Introduction
+
 ```{r setup, echo=FALSE, results="asis"}
 library(rebook)
 chapterPreamble()
 ```
-
-# Introduction
 
 [Bioconductor](https://bioconductor.org) is an open source, open development software project to provide tools for the analysis and comprehension of high-throughput genomic data. It is based primarily on the [R](http://www.r-project.org/) programming language.
 
