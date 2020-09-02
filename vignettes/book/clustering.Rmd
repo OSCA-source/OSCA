@@ -660,7 +660,7 @@ No point interpreting it by column, as you'd get multiple 100% values.
 An entry with a larger proportion may have a lower number of cells along a column.
 -->
 
-```{r walktrap-v-louvain-prop, fig.cap="Heatmap of the proportions of cells from each Walktrap cluster (rows) across the Louvain clusters (columns) in the PBMC dataset."}
+```{r walktrap-v-louvain-prop, fig.cap="Heatmap of the proportions of cells from each Walktrap cluster (rows) across the Louvain clusters (columns) in the PBMC dataset. Each row represents the distribution of cells across Louvain clusters for a given Walktrap cluster."}
 tab <- table(Walktrap=clust, Louvain=clust.louvain)
 tab <- tab/rowSums(tab)
 pheatmap(tab, color=viridis::viridis(100), cluster_cols=FALSE, cluster_rows=FALSE)
@@ -680,12 +680,11 @@ clustree(combined, prefix="k.", edge_arrow=FALSE)
 ```
 
 We can quantify the agreement between two clusterings by computing the Rand index with `r Biocpkg("bluster")`'s `pairwiseRand()`.
-This is defined as the proportion of pairs of cells that retain the same status
-(i.e., both cells in the same cluster, or each cell in different clusters) in both clusterings.
-In practice, we usually compute the adjusted Rand index (ARI)
-where we subtract the number of concordant pairs expected under random permutations of the clusterings;
-this accounts for differences in the size and number of clusters within and between clusterings.
+This is defined as the proportion of pairs of cells that retain the same status (i.e., both cells in the same cluster, or each cell in different clusters) in both clusterings.
+In practice, we usually compute the adjusted Rand index (ARI) where we subtract the number of concordant pairs expected under random permutations of the clusterings; this accounts for differences in the size and number of clusters within and between clusterings.
 A larger ARI indicates that the clusters are preserved, up to a maximum value of 1 for identical clusterings.
+In and of itself, the magnitude of the ARI has little meaning, and it is best used to assess the relative similarities of different clusterings (e.g., "Walktrap is more similar to Louvain than either are to Infomap").
+Nonetheless, if one must have a hard-and-fast rule, experience suggests that an ARI greater than 0.5 corresponds to "good" similarity between two clusterings.
 
 ```{r}
 pairwiseRand(clust, clust.5, mode="index") 

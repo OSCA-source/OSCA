@@ -67,14 +67,21 @@ stopifnot(mean(rowMeans(tab > 0)==1) > 0.9)
 ```
 
 Ordinarily, we would be obliged to perform marker detection to assign biological meaning to these clusters.
-For simplicity, we will skip this step by directly using the cell type labels provided by @pijuansala2019single.
+For simplicity, we will skip this step by directly using the existing cell type labels provided by @pijuansala2019single.
 These were obtained by mapping the cells in this dataset to a larger, pre-annotated "atlas" of mouse early embryonic development.
-While broadly consistent, many of our clusters map to multiple labels (Figure \@ref(fig:heat-cluster-label}), which reflects the difficulties in unambiguously resolving cell types undergoing differentiation.
+While there are obvious similarities, we see that many of our clusters map to multiple labels and vice versa (Figure \@ref(fig:heat-cluster-label)), which reflects the difficulties in unambiguously resolving cell types undergoing differentiation.
 
-```{r heat-cluster-label, fig.cap="Heatmap showing the abundance of cells with each combination of cluster (row) and cell type label (column). The color scale represents the log~2~-count for each combination."}
+```{r heat-cluster-label, fig.width=8, fig.height=8, fig.cap="Heatmap showing the abundance of cells with each combination of cluster (row) and cell type label (column). The color scale represents the log~2~-count for each combination."}
+library(bluster)
+pairwiseRand(colLabels(merged), merged$celltype.mapped, "index")
 by.label <- table(colLabels(merged), merged$celltype.mapped)
-pheatmap::pheatmap(log2(by.label+1), cluster_cols=FALSE, cluster_rows=FALSE,
-    color=viridis::viridis(101))
+pheatmap::pheatmap(log2(by.label+1), color=viridis::viridis(101))
+```
+
+```{r, echo=FALSE}
+# Though it can't be TOO dissimilar, as a sanity check.
+idx <- pairwiseRand(colLabels(merged), merged$celltype.mapped, "index")
+stopifnot(idx > 0.5)
 ```
 
 ## Differential expression between conditions

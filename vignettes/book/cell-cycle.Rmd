@@ -386,7 +386,7 @@ Most importantly, direct removal of genes is much less likely to introduce spuri
 
 Alternatively, we might consider a more sophisticated approach called contrastive PCA [@abid2018exploring].
 This aims to identify patterns that are enriched in our test dataset - in this case, the 416B data - compared to a control dataset in which cell cycle is the dominant factor of variation.
-We demonstrate below using the `r Biocpkg("scPCA")` package [@boileau2020exploring] where we use the subset of wild-type 416B cells as our control based on the expectation that an untreated cell line in culture has little else to do but divide.
+We demonstrate below using the `r Biocpkg("scPCA")` package [@boileau2020exploring] where we use the subset of wild-type 416B cells as our control, based on the expectation that an untreated cell line in culture has little else to do but divide.
 This yields low-dimensional coordinates in which the cell cycle effect within the oncogene-induced and wild-type groups is reduced without removing the difference between groups (Figure \@ref(fig:cell-cycle-contrastive)).
 
 ```{r cell-cycle-contrastive, fig.width=10, fig.height=10, fig.cap="$t$-SNE plots for the 416B dataset before and after contrastive PCA. Each point is a cell and is colored according to its inferred cell cycle phase (left) or oncogene induction status (right)."}
@@ -394,12 +394,11 @@ top.hvgs <- getTopHVGs(dec.416b, p=0.1)
 wild <- sce.416b$phenotype=="wild type phenotype"
 
 set.seed(100)
-# NOTE: my god, this takes a long time. Need to fix.  
 library(scPCA)
 con.out <- scPCA(
     target=t(logcounts(sce.416b)[top.hvgs,]),
     background=t(logcounts(sce.416b)[top.hvgs,wild]),
-    alg="rand_var_proj", penalties=1e-8, n_centers=5, n_eigen=10)
+    penalties=0, n_eigen=10, contrasts=100)
 
 # Visualizing the results in a t-SNE.
 sce.con <- sce.416b
@@ -438,6 +437,16 @@ The strength of this approach lies in its ability to accurately remove the cell 
 This avoids loss of heterogeneity associated with other processes that happen to be correlated with the cell cycle.
 The requirements for the control dataset are also quite loose - there is no need to know the cell cycle phase of each cell _a priori_, and indeed, we can manufacture a like-for-like control by subsetting our dataset to a homogeneous cluster in which the only detectable factor of variation is the cell cycle.
 In fact, any consistent but uninteresting variation can be eliminated in this manner as long as it is captured by the control.
+
+<!--
+Consider a gene that is weakly DE across cell cycle phases.
+However, the same gene is strongly DE due to other factors, e.g., cell type identity.
+Now, say that these other factors happen to be correlated with phase, e.g., due to changes in cell type composition.
+Regression will wipe out the DE, potentially also introducing spurious differences.
+On the other hand, if the cycle-induced DE is weak enough relative to that caused by the other factors, 
+this gene can still contribute as a highly-weighted feature of one of the cPCs. 
+Similarly, gene removal would not be able to distinguish between phase and the other factors when computing % var explained.
+-->
 
 The downside is that the magnitude of variation in the control dataset must accurately reflect that in the test dataset, requiring more care in choosing the former.
 As a result, the procedure is more sensitive to quantitative differences between datasets compared to `SingleR()` or `cyclone()` during cell cycle phase assignment.
