@@ -37,4 +37,4 @@ jobs:
       - name: Pushing to Bioconductor
         run : |
           ssh-keyscan -t rsa git.bioconductor.org >> /home/runner/.ssh/known_hosts
-          git push git@git.bioconductor.org:packages/OrchestratingSingleCellAnalysisWrapper ${{ matrix.branch }}
+          git push git@git.bioconductor.org:packages/OSCA ${{ matrix.branch }}
