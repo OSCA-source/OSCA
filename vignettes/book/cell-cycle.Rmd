@@ -436,6 +436,7 @@ stopifnot(median(con.sil$width) > 0.3)
 The strength of this approach lies in its ability to accurately remove the cell cycle effect based on its magnitude in the control dataset.
 This avoids loss of heterogeneity associated with other processes that happen to be correlated with the cell cycle.
 The requirements for the control dataset are also quite loose - there is no need to know the cell cycle phase of each cell _a priori_, and indeed, we can manufacture a like-for-like control by subsetting our dataset to a homogeneous cluster in which the only detectable factor of variation is the cell cycle.
+(See Chapter \@ref(messmer-hesc) for another demonstration of cPCA to remove the cell cycle effect.)
 In fact, any consistent but uninteresting variation can be eliminated in this manner as long as it is captured by the control.
 
 <!--

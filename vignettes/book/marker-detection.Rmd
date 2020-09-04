@@ -358,76 +358,79 @@ users can treat this as retaining information about the total RNA content, analo
 
 ### Using custom DE methods
 
-It is also possible to perform marker gene detection based on precomputed DE statistics, which allows us to take advantage of more sophisticated tests in dedicated DE analysis packages in the Bioconductor ecosystem.
-To demonstrate, consider the `voom()` approach from the `r Biocpkg("limma")` package [@law2014voom].
-We first process our `SingleCellExperiment` to obtain a `fit` object as shown below.
+We can also detect marker genes from precomputed DE statistics, allowing us to take advantage of more sophisticated tests in other Bioconductor packages such as `r Biocpkg("edgeR")` and `r Biocpkg("DESeq2")`.
+This functionality is not commonly used - see below for an explanation - but nonetheless, we will demonstrate how one would go about applying it to the PBMC dataset.
+Our strategy is to loop through each pair of clusters, performing a more-or-less standard DE analysis between pairs using the `voom()` approach from the `r Biocpkg("limma")` package [@law2014voom].
+(Specifically, we use the TREAT strategy [@mccarthy2009treat] to test for log-fold changes that are significantly greater than 0.5.)
 
 ```{r}
 library(limma)
-design <- model.matrix(~0 + label, data=colData(sce.pbmc))
-colnames(design)
-
-# Removing very low-abundance genes.
-keep <- calculateAverage(sce.pbmc) > 0.1 
-summary(keep)
-
-y <- convertTo(sce.pbmc, subset.row=keep)
-v <- voom(y, design)
-fit <- lmFit(v, design)
-```
-
-We then perform pairwise comparisons between clusters using the TREAT strategy [@mccarthy2009treat] to test for log-fold changes that are significantly greater than 0.5.
-For each comparison, we store the corresponding data frame of statistics in `all.results`, along with the identities of the clusters involved in `all.pairs`.
-
-```{r}
-nclust <- length(unique(colLabels(sce.pbmc)))
+dge <- convertTo(sce.pbmc)
+uclust <- unique(dge$samples$label)
 all.results <- all.pairs <- list()
 counter <- 1L
 
-# Iterating across the first 'nclust' coefficients in design,
-# and comparing them to each other in a pairwise manner.
-for (x in seq_len(nclust)) {
-    for (y in seq_len(x-1L)) {
-        con <- integer(ncol(design))
-        con[x] <- 1
-        con[y] <- -1
-        fit2 <- contrasts.fit(fit, con)
-        fit2 <- treat(fit2, robust=TRUE, lfc=0.5)
+for (x in uclust) {
+    for (y in uclust) {
+        if (x==y) break # avoid redundant comparisons.
 
-        res <- topTreat(fit2, n=Inf, sort.by="none")
+        # Factor ordering ensures that 'x' is the not the intercept,
+        # so resulting fold changes can be interpreted as x/y.
+        subdge <- dge[,dge$samples$label %in% c(x, y)]
+        subdge$samples$label <- factor(subdge$samples$label, c(y, x))
+        design <- model.matrix(~label, subdge$samples)
+
+        # No need to normalize as we are using the size factors
+        # transferred from 'sce.pbmc' and converted to norm.factors.
+        # We also relax the filtering for the lower UMI counts.
+        subdge <- subdge[calculateAverage(subdge$counts) > 0.1,]
+
+        # Standard voom-limma pipeline starts here.
+        v <- voom(subdge, design)
+        fit <- lmFit(v, design)
+        fit <- treat(fit, lfc=0.5)
+        res <- topTreat(fit, n=Inf, sort.by="none")
+
+        # Filling out the genes that got filtered out with NA's.
+        res <- res[rownames(dge),]
+        rownames(res) <- rownames(dge)
+
         all.results[[counter]] <- res
-        all.pairs[[counter]] <- colnames(design)[c(x, y)]
+        all.pairs[[counter]] <- c(x, y)
         counter <- counter+1L
 
         # Also filling the reverse comparison.
         res$logFC <- -res$logFC
         all.results[[counter]] <- res
-        all.pairs[[counter]] <- colnames(design)[c(y, x)]
+        all.pairs[[counter]] <- c(y, x)
         counter <- counter+1L
     }
 }
 ```
 
-These custom results are consolidated into a single marker list for each cluster with the `combineMarkers()` function.
-This combines test statistics across all pairwise comparisons involving a single cluster,
-yielding a per-cluster `DataFrame` that can be interpreted in the same manner as discussed previously.
+For each comparison, we store the corresponding data frame of statistics in `all.results`, along with the identities of the clusters involved in `all.pairs`.
+We consolidate the pairwise DE statistics into a single marker list for each cluster with the `combineMarkers()` function, yielding a per-cluster `DataFrame` that can be interpreted in the same manner as discussed previously.
+We can also specify `pval.type=` and `direction=` to control the consolidation procedure, e.g., setting `pval.type="all"` and `direction="up"` will prioritize genes that are significantly upregulated in each cluster against _all_ other clusters.
 
 ```{r}
 all.pairs <- do.call(rbind, all.pairs)
 combined <- combineMarkers(all.results, all.pairs, pval.field="P.Value")
 
-# Inspecting results for our cluster of interest again.
-interesting.voom <- combined[[paste0("cluster", chosen)]] 
+# Inspecting the results for one of the clusters.
+interesting.voom <- combined[[chosen]] 
 colnames(interesting.voom)
 head(interesting.voom[,1:4])
 ```
 
-By default, we do not use custom DE methods to perform marker detection, for several reasons.
+We do not routinely use custom DE methods to perform marker detection, for several reasons.
 Many of these methods rely on empirical Bayes shrinkage to share information across genes in the presence of limited replication. 
-However, this is unnecessary when there are large numbers of "replicate" cells in each group (Section \@ref(false-replicates)).
+This is unnecessary when there are large numbers of "replicate" cells in each group, and does nothing to solve the fundamental $n=1$ problem in these comparisons (Section \@ref(false-replicates)).
 These methods also make stronger assumptions about the data (e.g., equal variances for linear models, the distribution of variances during empirical Bayes) that are more likely to be violated in noisy scRNA-seq contexts.
 From a practical perspective, they require more work to set up and take more time to run.
-Nonetheless, some custom methods (e.g., `r Biocpkg("MAST")`) may provide a useful point of difference from the simpler tests, in which case they can be converted into a marker detection scheme as described above.
+
+That said, some custom methods (e.g., `r Biocpkg("MAST")`) may provide a useful point of difference from the simpler tests, in which case they can be converted into a marker detection scheme by modifing the above code.
+Indeed, the same code chunk can be directly applied (after switching back to the standard filtering and normalization steps inside the loop) to bulk RNA-seq experiments involving a large number of different conditions.
+This allows us to recycle the `r Biocpkg("scran")` machinery to consolidate results across many pairwise comparisons for easier interpretation.
 
 ### Combining multiple marker statistics
 

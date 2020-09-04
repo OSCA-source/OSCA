@@ -1,0 +1,249 @@
+# Messmer human ESC (Smart-seq2) {#messmer-hesc}
+
+```{r, echo=FALSE, results='asis'}
+library(rebook)
+chapterPreamble()
+```
+
+## Introduction
+
+This performs an analysis of the human embryonic stem cell (hESC) dataset generated with Smart-seq2 [@messmer2019transcriptional], which contains several plates of naive and primed hESCs.
+The chapter's code is based on the steps in the paper's [GitHub repository](https://github.com/MarioniLab/NaiveHESC2016/blob/master/analysis/preprocess.Rmd), with some additional steps for cell cycle effect removal contributed by Philippe Boileau.
+
+## Data loading
+
+Converting the batch to a factor, to make life easier later on.
+
+```{r load-data, echo=FALSE}
+library(scRNAseq)
+sce.mess <- MessmerESCData()
+sce.mess$`experiment batch` <- factor(sce.mess$`experiment batch`)
+```
+
+```{r gene-annotations}
+library(AnnotationHub)
+ens.hs.v97 <- AnnotationHub()[["AH73881"]]
+anno <- select(ens.hs.v97, keys=rownames(sce.mess), 
+    keytype="GENEID", columns=c("SYMBOL"))
+rowData(sce.mess) <- anno[match(rownames(sce.mess), anno$GENEID),]
+```
+
+## Quality control
+
+```{r qc-metrics, echo=FALSE}
+location <- rowRanges(sce.mess)
+is_mito <- any(seqnames(location) == "MT")
+
+library(scater)
+sce.mess <- addPerCellQC(sce.mess, subsets = list(Mito = is_mito))
+filtered <- quickPerCellQC(colData(sce.mess), sub.fields=TRUE, 
+    batch=sce.mess$`experiment batch`) 
+
+original <- sce.mess
+sce.mess <- sce.mess[,!filtered$discard]
+```
+
+Let's have a look at the QC statistics.
+
+```{r}
+colSums(as.matrix(filtered))
+```
+
+```{r unref-messmer-hesc-qc, fig.width=6, fig.height=10, fig.cap="Distribution of QC metrics across batches (x-axis) and phenotypes (facets) for cells in the Messmer hESC dataset. Each point is a cell and is colored by whether it was discarded."}
+gridExtra::grid.arrange(
+    plotColData(original, x="experiment batch", y="sum",
+        colour_by=I(filtered$discard), other_field="phenotype") +
+        facet_wrap(~phenotype) + scale_y_log10(),
+    plotColData(original, x="experiment batch", y="detected",
+        colour_by=I(filtered$discard), other_field="phenotype") +
+        facet_wrap(~phenotype) + scale_y_log10(),
+    plotColData(original, x="experiment batch", y="subsets_Mito_percent",
+        colour_by=I(filtered$discard), other_field="phenotype") +
+        facet_wrap(~phenotype),
+    plotColData(original, x="experiment batch", y="altexps_ERCC_percent",
+        colour_by=I(filtered$discard), other_field="phenotype") +
+        facet_wrap(~phenotype),
+    ncol=1
+)
+```
+
+## Normalization
+
+```{r normalization}
+library(scran)
+
+set.seed(10000)
+clusters <- quickCluster(sce.mess)
+sce.mess <- computeSumFactors(sce.mess, cluster=clusters)
+sce.mess <- logNormCounts(sce.mess)
+```
+
+```{r unref-messmer-hesc-norm, fig.cap="Deconvolution size factors plotted against the library size (left) and spike-in size factors plotted against the deconvolution size factors (right). Each point is a cell and is colored by its phenotype."}
+par(mfrow=c(1,2))
+plot(sce.mess$sum, sizeFactors(sce.mess), log = "xy", pch=16,
+     xlab = "Library size (millions)", ylab = "Size factor",
+     col = ifelse(sce.mess$phenotype == "naive", "black", "grey"))
+
+spike.sf <- librarySizeFactors(altExp(sce.mess, "ERCC"))
+plot(sizeFactors(sce.mess), spike.sf, log = "xy", pch=16,
+     ylab = "Spike-in size factor", xlab = "Deconvolution size factor",
+     col = ifelse(sce.mess$phenotype == "naive", "black", "grey"))
+```
+
+## Cell cycle phase assignment
+
+```{r cell-cycle}
+set.seed(10001)
+hs_pairs <- readRDS(system.file("exdata", "human_cycle_markers.rds", package="scran"))
+assigned <- cyclone(sce.mess, pairs=hs_pairs, gene.names=rownames(sce.mess))
+sce.mess$phase <- assigned$phases
+```
+
+```{r}
+table(sce.mess$phase)
+```
+
+```{r unref-messmer-hesc-cyclone, fig.cap="G1 `cyclone()` phase scores against the G2/M phase scores for each cell in the Messmer hESC dataset."}
+smoothScatter(assigned$scores$G1, assigned$scores$G2M, xlab="G1 score",
+     ylab="G2/M score", pch=16)
+```
+
+## Feature selection
+
+```{r feature-selection}
+dec <- modelGeneVarWithSpikes(sce.mess, "ERCC", block = sce.mess$`experiment batch`)
+top.hvgs <- getTopHVGs(dec, prop = 0.1)
+```
+
+```{r unref-messmer-hesc-var, fig.width=12, fig.height=5, fig.cap="Per-gene variance of the log-normalized expression values in the Messmer hESC dataset, plotted against the mean for each batch. Each point represents a gene with spike-ins shown in red and the fitted trend shown in blue."}
+par(mfrow=c(1,3))
+for (i in seq_along(dec$per.block)) {
+    current <- dec$per.block[[i]]
+    plot(current$mean, current$total, xlab="Mean log-expression", 
+        ylab="Variance", pch=16, cex=0.5, main=paste("Batch", i))
+
+    fit <- metadata(current)
+    points(fit$mean, fit$var, col="red", pch=16)
+    curve(fit$trend(x), col='dodgerblue', add=TRUE, lwd=2)
+}
+```
+
+## Batch correction 
+
+We eliminate the obvious batch effect between batches with linear regression, 
+which is possible due to the replicated nature of the experimental design.
+
+```{r batch-correction}
+# TODO: modify regressBatches to preserve some of the covariates.
+library(limma)
+assay(sce.mess, "corrected") <- removeBatchEffect(
+  logcounts(sce.mess),
+  design = model.matrix(~sce.mess$phenotype),
+  batch = sce.mess$`experiment batch`
+)
+```
+
+## Dimensionality Reduction
+
+```{r dimensionality-reduction}
+set.seed(1101001)
+sce.mess <- runPCA(sce.mess, subset_row = top.hvgs, exprs_values = "corrected")
+sce.mess <- runTSNE(sce.mess, dimred = "PCA", perplexity = 40)
+```
+
+From a naive PCA, the cell cycle appears to be a major source of biological variation within each phenotype.
+
+```{r unref-messmer-hesc-tsne, fig.width=10, fig.height=10, fig.cap="Obligatory $t$-SNE plots of the Messmer hESC dataset, where each point is a cell and is colored by various attributes."}
+gridExtra::grid.arrange(
+    plotTSNE(sce.mess, colour_by = "phenotype") + ggtitle("By phenotype"),
+    plotTSNE(sce.mess, colour_by = "experiment batch") + ggtitle("By batch "),
+    plotTSNE(sce.mess, colour_by = "CDK1", swap_rownames="SYMBOL") + ggtitle("By CDK1"),
+    plotTSNE(sce.mess, colour_by = "phase") + ggtitle("By phase"),
+    ncol = 2
+)
+```
+
+We perform contrastive PCA (cPCA) and sparse cPCA (scPCA) on the corrected log-expression data to obtain the same number of PCs.
+Given that the naive hESCs are actually reprogrammed primed hESCs, we will use the single batch of primed-only hESCs as the "background" dataset to remove the cell cycle effect.
+
+```{r contrastive-pca}
+library(scPCA)
+is.bg <- sce.mess$`experiment batch`=="3"
+target <- sce.mess[,!is.bg]
+background <- sce.mess[,is.bg]
+
+mat.target <- t(assay(target, "corrected")[top.hvgs,])
+mat.background <- t(assay(background, "corrected")[top.hvgs,])
+
+set.seed(1010101001)
+con_out <- scPCA(
+    target = mat.target,
+    background = mat.background,
+    penalties = 0, # no penalties = non-sparse cPCA.
+    n_eigen = 50,
+    contrasts = 100
+)
+reducedDim(target, "cPCA") <- con_out$x
+```
+
+```{r sparse-contrastive-pca}
+set.seed(101010101)
+sparse_con_out <- scPCA(
+    target = mat.target,
+    background = mat.background,
+    penalties = 1e-4,
+    n_eigen = 50,
+    contrasts = 100,
+    alg = "rand_var_proj" # for speed.
+)
+reducedDim(target, "scPCA") <- sparse_con_out$x
+```
+
+We see greater intermingling between phases within both the naive and primed cells after cPCA and scPCA.
+
+```{r tsne}
+set.seed(1101001)
+target <- runTSNE(target, dimred = "cPCA", perplexity = 40, name="cPCA+TSNE")
+target <- runTSNE(target, dimred = "scPCA", perplexity = 40, name="scPCA+TSNE")
+```
+
+```{r unref-messmer-hesc-cpca-tsne, fig.width=10, fig.height=4, fig.cap="More $t$-SNE plots of the Messmer hESC dataset after cPCA and scPCA, where each point is a cell and is colored by its assigned cell cycle phase."}
+gridExtra::grid.arrange(
+    plotReducedDim(target, "cPCA+TSNE", colour_by = "phase") + ggtitle("After cPCA"),
+    plotReducedDim(target, "scPCA+TSNE", colour_by = "phase") + ggtitle("After scPCA"),
+    ncol=2
+)
+```
+
+We can quantify the change in the separation between phases within each phenotype using the silhouette coefficient.
+
+```{r}
+library(bluster)
+naive <- target[,target$phenotype=="naive"]
+primed <- target[,target$phenotype=="primed"]
+
+N <- approxSilhouette(reducedDim(naive, "PCA"), naive$phase)
+P <- approxSilhouette(reducedDim(primed, "PCA"), primed$phase)
+c(naive=mean(N$width), primed=mean(P$width))
+
+cN <- approxSilhouette(reducedDim(naive, "cPCA"), naive$phase)
+cP <- approxSilhouette(reducedDim(primed, "cPCA"), primed$phase)
+c(naive=mean(cN$width), primed=mean(cP$width))
+
+scN <- approxSilhouette(reducedDim(naive, "scPCA"), naive$phase)
+scP <- approxSilhouette(reducedDim(primed, "scPCA"), primed$phase)
+c(naive=mean(scN$width), primed=mean(scP$width))
+```
+
+```{r, echo=FALSE}
+# Sanity check for reduction in the silhouette.
+original <- c(naive=mean(N$width), primed=mean(P$width))
+stopifnot(all(original > c(naive=mean(cN$width), primed=mean(cP$width))))
+stopifnot(all(original > c(naive=mean(scN$width), primed=mean(scP$width))))
+```
+
+## Session information
+
+```{r, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

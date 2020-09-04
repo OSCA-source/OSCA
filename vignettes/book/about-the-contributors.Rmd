@@ -41,3 +41,5 @@ Kevin Rue-Albrecht (University of Oxford, United Kingdom), for contributing the 
 Charlotte Soneson (Friedrich Miescher Institute, Switzerland), for many formatting and typographical fixes.
 
 Al J Abadi (University of Melbourne, Australia), for bringing the log-normalization corner case to our attention.
+
+Philippe Boileau (University of California Berkeley, USA), for demonstrations on how to use scPCA. 

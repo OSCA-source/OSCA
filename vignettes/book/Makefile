@@ -1,4 +1,4 @@
-all: tenx-unfiltered-pbmc4k.md muraro-pancreas.md segerstolpe-pancreas.md zeisel-brain.md bach-mammary.md lun-416b.md grun-hsc.md tenx-filtered-pbmc3k-4k-8k.md lawlor-pancreas.md grun-pancreas.md tenx-repertoire-pbmc8k.md pijuan-embryo.md nestorowa-hsc.md about-the-contributors.md beyond-r-basics.md bibliography.md data-infrastructure.md hca-bone-marrow.md index.md interoperability.md introduction.md learning-r-and-bioconductor.md nuclei-analysis.md overview.md paul-hsc.md protein-abundance.md big-data.md droplet-processing.md interactive.md normalization.md reduced-dimensions.md cell-annotation.md doublet-detection.md clustering.md feature-selection.md quality-control.md cell-cycle.md data-integration.md marker-detection.md merged-pancreas.md repertoire-seq.md sample-comparisons.md trajectory.md
+all: tenx-unfiltered-pbmc4k.md muraro-pancreas.md segerstolpe-pancreas.md zeisel-brain.md bach-mammary.md lun-416b.md grun-hsc.md tenx-filtered-pbmc3k-4k-8k.md lawlor-pancreas.md grun-pancreas.md tenx-repertoire-pbmc8k.md pijuan-embryo.md nestorowa-hsc.md about-the-contributors.md beyond-r-basics.md bibliography.md data-infrastructure.md hca-bone-marrow.md index.md interoperability.md introduction.md learning-r-and-bioconductor.md messmer-hesc.md nuclei-analysis.md overview.md paul-hsc.md protein-abundance.md big-data.md droplet-processing.md interactive.md normalization.md reduced-dimensions.md cell-annotation.md doublet-detection.md clustering.md feature-selection.md quality-control.md cell-cycle.md data-integration.md marker-detection.md merged-pancreas.md repertoire-seq.md sample-comparisons.md trajectory.md
 
 tenx-unfiltered-pbmc4k.md: tenx-unfiltered-pbmc4k.Rmd
 	R -e "knitr::knit('tenx-unfiltered-pbmc4k.Rmd')"
@@ -65,6 +65,9 @@ introduction.md: introduction.Rmd
 
 learning-r-and-bioconductor.md: learning-r-and-bioconductor.Rmd
 	R -e "knitr::knit('learning-r-and-bioconductor.Rmd')"
+
+messmer-hesc.md: messmer-hesc.Rmd
+	R -e "knitr::knit('messmer-hesc.Rmd')"
 
 nuclei-analysis.md: nuclei-analysis.Rmd
 	R -e "knitr::knit('nuclei-analysis.Rmd')"

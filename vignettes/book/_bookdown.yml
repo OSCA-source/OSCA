@@ -50,6 +50,7 @@ rmd_files: ["index.Rmd",
     "nestorowa-hsc.Rmd",
     "pijuan-embryo.Rmd",
     "bach-mammary.Rmd",
+    "messmer-hesc.Rmd",
     "hca-bone-marrow.Rmd",
     # Part 4, other crap:
     "about-the-contributors.Rmd",
