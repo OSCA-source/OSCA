@@ -278,7 +278,7 @@ COR <- cor(
 stopifnot(COR > 0.95)
 ```
 
-## Further comments
+### Further comments
 
 After demultiplexing, it is a simple matter to subset the `SingleCellExperiment` to the confident assignments.
 This actually involves two steps - the first is to subset to the libraries that were actually used in `hashedDrops()`, and the second is to subset to the libraries that were confidently assigned to a single sample.
@@ -315,6 +315,87 @@ stopifnot(bluster::pairwiseRand(out, sce$cell.line, mode="index") > 0.95)
 ```
 
 Cell hashing information can also be used to detect doublets - see Chapter \@ref(doublet-detection) for more details.
+
+## Removing swapped molecules
+
+Some of the more recent DNA sequencing machines released by Illumina (e.g., HiSeq 3000/4000/X, X-Ten, and NovaSeq) use patterned flow cells to improve throughput and cost efficiency.
+However, in multiplexed pools, the use of these flow cells can lead to the mislabelling of DNA molecules with the incorrect library barcode [@sinha2017index], a phenomenon known as "barcode swapping".
+This leads to contamination of each library with reads from other libraries - for droplet sequencing experiments, this is particularly problematic as it manifests as the appearance of artificial cells that are low-coverage copies of their originals from other samples [@griffiths2018detection].
+
+Fortunately, it is easy enough to remove affected reads from droplet experiments with the `swappedDrops()` function from `r Biocpkg("DropletUtils")`.
+Given a multiplexed pool of samples, we identify potential swapping events as transcript molecules that share the same combination of UMI sequence, assigned gene and cell barcode across samples.
+We only keep the molecule if it has dominant coverage in a single sample, which is likely to be its original sample; we remove all (presumably swapped) instances of that molecule in the other samples.
+Our assumption is that it is highly unlikely that two molecules would have the same combination of values by chance.
+
+To demonstrate, we will use some multiplexed 10X Genomics data from an _attempted_ study of the mouse mammary gland [@griffiths2018detection].
+This experiment consists of 8 scRNA-seq samples from various stages of mammary gland development, sequenced using the HiSeq 4000.
+We use the `r Biocpkg("DropletTestFiles")` package to obtain the molecule information files produced by the CellRanger software suite; as its name suggests, this file format contains information on each individual transcript molecule in each sample.
+
+```{r}
+library(DropletTestFiles)
+swap.files <- listTestFiles(dataset="bach-mammary-swapping")
+swap.files <- swap.files[dirname(swap.files$file.name)=="hiseq_4000",]
+swap.files <- vapply(swap.files$rdatapath, getTestFile, prefix=FALSE, "")
+names(swap.files) <- sub(".*_(.*)\\.h5", "\\1", names(swap.files))
+```
+
+We examine the barcode rank plots before making any attempt to remove swapped molecules (Figure \@ref(fig:mammary-swapped-barcode-rank)), using the `get10xMolInfoStats()` function to efficiently obtain summary statistics from each molecule information file.
+We see that samples E1 and F1 have different curves but this is not cause for alarm given that they also correspond to a different developmental stage compared to the other samples.
+
+```{r mammary-swapped-barcode-rank, fig.cap="Barcode rank curves for all samples in the HiSeq 4000-sequenced mammary gland dataset, before removing any swapped molecules."}
+library(DropletUtils)
+before.stats <- lapply(swap.files, get10xMolInfoStats)
+
+max.umi <- vapply(before.stats, function(x) max(x$num.umis), 0)
+ylim <- c(1, max(max.umi))
+max.ncells <- vapply(before.stats, nrow, 0L)
+xlim <- c(1, max(max.ncells))
+
+plot(0,0,type="n", xlab="Rank", ylab="Number of UMIs", 
+    log="xy", xlim=xlim, ylim=ylim)
+for (i in seq_along(before.stats)) {
+    u <- sort(before.stats[[i]]$num.umis, decreasing=TRUE)
+    lines(seq_along(u), u, col=i, lwd=5)
+}
+
+legend("topright", col=seq_along(before.stats), 
+    lwd=5, legend=names(before.stats))
+```
+
+We apply the `swappedDrops()` function to the molecule information files to identify and remove swapped molecules from each sample.
+While all samples have some percentage of removed molecules, the majority of molecules in samples E1 and F1 are considered to be swapping artifacts.
+The most likely cause is that these samples contain no real cells or highly damaged cells with little RNA, which frees up sequencing resources for deeper coverage of swapped molecules.
+
+```{r}
+after.mat <- swappedDrops(swap.files, get.swapped=TRUE)
+cleaned.sum <- vapply(after.mat$cleaned, sum, 0)
+swapped.sum <- vapply(after.mat$swapped, sum, 0)
+swapped.sum / (swapped.sum + cleaned.sum)
+```
+
+```{r, echo=FALSE}
+prop <- swapped.sum / (swapped.sum + cleaned.sum)
+stopifnot(all(prop[c("E1", "F1")] > 0.8))
+stopifnot(all(prop[setdiff(names(prop), c("E1", "F1"))] < 0.15))
+```
+
+After removing the swapped molecules, the barcode rank curves for E1 and F1 drop dramatically (Figure \@ref(fig:mammary-swapped-barcode-rank-after)).
+This represents the worst-case outcome of the swapping phenomenon, where cells are "carbon-copied"^[For those of you who know what that is.] from the other multiplexed samples.
+Proceeding with the cleaned matrices protects us from these egregious artifacts as well as the more subtle effects of contamination.
+
+```{r mammary-swapped-barcode-rank-after, fig.cap="Barcode rank curves for all samples in the HiSeq 4000-sequenced mammary gland dataset, after removing any swapped molecules."}
+plot(0,0,type="n", xlab="Rank", ylab="Number of UMIs", 
+    log="xy", xlim=xlim, ylim=ylim)
+
+for (i in seq_along(after.mat$cleaned)) {
+    cur.stats <- barcodeRanks(after.mat$cleaned[[i]])
+    u <- sort(cur.stats$total, decreasing=TRUE)
+    lines(seq_along(u), u, col=i, lwd=5)
+}
+
+legend("topright", col=seq_along(after.mat$cleaned), 
+    lwd=5, legend=names(after.mat$cleaned))
+```
 
 ## Session Info {-}
 

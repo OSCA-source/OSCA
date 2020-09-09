@@ -115,7 +115,7 @@ gridExtra::grid.arrange(
 Similarly, we can perform marker detection on the snRNA-seq expression values as discussed in Section \@ref(marker-detection).
 For the most part, interpretation of these DE results makes the simplifying assumption that nuclear abundances are a good proxy for the overall expression profile.
 This is generally reasonable but may not always be true, resulting in some discrepancies in the marker sets between snRNA-seq and scRNA-seq datasets.
-For example, transcripts for strongly expressed genes are more likely to localize to the cytoplasm for efficient translation and subsequently lost upon stripping, while genes with the same overall expression but differences in the rate of nuclear export may appear to be differentially expressed between clusters.
+For example, transcripts for strongly expressed genes might localize to the cytoplasm for efficient translation and subsequently be lost upon stripping, while genes with the same overall expression but differences in the rate of nuclear export may appear to be differentially expressed between clusters.
 In the most pathological case, higher snRNA-seq abundances may indicate nuclear sequestration of transcripts for protein-coding genes and reduced activity of the relevant biological process, contrary to the usual interpretation of the effect of upregulation.
 
 ```{r}
@@ -138,14 +138,13 @@ The expected absence of genuine mitochondrial expression can also be exploited t
 We demonstrate on mouse brain snRNA-seq data from 10X Genomics [@zheng2017massively], using the raw count matrix prior to any filtering for nuclei-containing barcodes.
 
 ```{r}
-library(BiocFileCache)
-bfc <- BiocFileCache("raw_data", ask = FALSE)
-raw.path <- bfcrpath(bfc, file.path("http://cf.10xgenomics.com/samples",
-    "cell-exp/2.0.1/nuclei_900/nuclei_900_raw_gene_bc_matrices.tar.gz"))
-untar(raw.path, exdir=file.path(tempdir(), "nuclei"))
+library(DropletTestFiles)
+raw.path <- getTestFile("tenx-2.0.1-nuclei_900/1.0.0/raw.tar.gz")
+out.path <- file.path(tempdir(), "nuclei")
+untar(raw.path, exdir=out.path)
 
 library(DropletUtils)
-fname <- file.path(tempdir(), "nuclei/raw_gene_bc_matrices/mm10")
+fname <- file.path(out.path, "raw_gene_bc_matrices/mm10")
 sce.brain <- read10xCounts(fname, col.names=TRUE)
 sce.brain
 ```

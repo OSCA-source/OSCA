@@ -14,14 +14,13 @@ from which we download the raw gene/barcode count matrices, i.e., before cell ca
 ## Data loading
 
 ```{r loading}
-library(BiocFileCache)
-bfc <- BiocFileCache("raw_data", ask = FALSE)
-raw.path <- bfcrpath(bfc, file.path("http://cf.10xgenomics.com/samples",
-    "cell-exp/2.1.0/pbmc4k/pbmc4k_raw_gene_bc_matrices.tar.gz"))
-untar(raw.path, exdir=file.path(tempdir(), "pbmc4k"))
+library(DropletTestFiles)
+raw.path <- getTestFile("tenx-2.1.0-pbmc4k/1.0.0/raw.tar.gz")
+out.path <- file.path(tempdir(), "pbmc4k")
+untar(raw.path, exdir=out.path)
 
 library(DropletUtils)
-fname <- file.path(tempdir(), "pbmc4k/raw_gene_bc_matrices/GRCh38")
+fname <- file.path(out.path, "raw_gene_bc_matrices/GRCh38")
 sce.pbmc <- read10xCounts(fname, col.names=TRUE)
 ```
 
