@@ -14,7 +14,7 @@ The chapter's code is based on the steps in the paper's [GitHub repository](http
 
 Converting the batch to a factor, to make life easier later on.
 
-```{r load-data, echo=FALSE}
+```{r load-data}
 library(scRNAseq)
 sce.mess <- MessmerESCData()
 sce.mess$`experiment batch` <- factor(sce.mess$`experiment batch`)
