@@ -1,7 +1,7 @@
 ---
 output:
   html_document
-bibliography: ../ref.bib
+bibliography: ref.bib
 ---
 
 # Integrating with protein abundance
@@ -28,19 +28,17 @@ And, of course, the use of antibodies against protein targets involves considera
 
 In this chapter, we will describe some strategies for integrated analysis of ADT and transcript data in CITE-seq experiments.
 We will demonstrate using a PBMC dataset from 10X Genomics that contains quantified abundances for a number of interesting surface proteins.
+We conveniently obtain the dataset using the `r Biocpkg("DropletTestFiles")` package, after which we can create a `SingleCellExperiment` as shown below.
 
 ```{r}
-# Caching it locally with BiocFileCache to avoid repeating the download.
-library(BiocFileCache)
-bfc <- BiocFileCache(ask=FALSE)
-stuff <- bfcrpath(bfc, file.path("http://cf.10xgenomics.com",
-    "samples/cell-exp/3.0.0/pbmc_10k_protein_v3",
-    "pbmc_10k_protein_v3_filtered_feature_bc_matrix.tar.gz"))
-untar(stuff, exdir=tempdir())
+library(DropletTestFiles)
+path <- getTestFile("tenx-3.0.0-pbmc_10k_protein_v3/1.0.0/filtered.tar.gz")
+dir <- tempfile()
+untar(path, exdir=dir)
 
 # Loading it in as a SingleCellExperiment object.
 library(DropletUtils)
-sce <- read10xCounts(file.path(tempdir(), "filtered_feature_bc_matrix"))
+sce <- read10xCounts(file.path(dir, "filtered_feature_bc_matrix"))
 sce
 ```
 
