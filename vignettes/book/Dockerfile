@@ -3,13 +3,14 @@ FROM bioconductor/bioconductor_docker:devel
 RUN mkdir /home/book
 COPY . /home/book
 
-RUN apt-get update \
-  && apt-get install --no-install-recommends -y libglpk-dev \
-  && rm -rf /var/lib/apt/lists/*
+RUN R --quiet -e "options(warn=2); BiocManager::install(union(remotes::local_package_deps('/home/book'), 'bookdown'))"
 
-RUN R --quiet -e "options(warn=2); BiocManager::install(setdiff(strsplit(read.dcf('/home/book/DESCRIPTION')[,'Imports'], ',\n')[[1]], 'rebook'))" \
-  && R --quiet -e "options(warn=2); BiocManager::install('bookdown')" \
-  && R --quiet -e "options(warn=2); BiocManager::install('LTLA/rebook')"
+LABEL name="bioconductor/bioconductor_docker_orchestratingsinglecellanalysis" \
+      version="1.0.0" \
+      url="https://github.com/Bioconductor/bioconductor_docker_orchestratingsinglecellanalysis" \
+      maintainer="infinite.monkeys.with.keyboards@gmail.com" \
+      description="Build environment and contents of the OSCA book" \
+      license="Artistic-2.0"
 
 RUN mkdir /home/cache
 ENV EXPERIMENT_HUB_CACHE /home/cache/ExperimentHub

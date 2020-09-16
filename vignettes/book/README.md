@@ -30,7 +30,12 @@ Also note the `chapterPreamble()` code chunk that is required at the top of each
 
 ## Build instructions
 
-Install the **rebook** package from https://github.com/LTLA/rebook.
+Install all relevant packages in the `DESCRIPTION`:
+
+```r
+BiocManager::install(remotes::local_package_deps())
+```
+
 Then, run the usual **bookdown** invocation, for example:
 
 ```r
