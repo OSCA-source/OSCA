@@ -58,16 +58,16 @@ The choice between these two perspectives is left to the analyst based on which 
 The `r Biocpkg("TSCAN")` algorithm uses a simple yet effective approach to trajectory reconstruction.
 It uses the clustering to summarize the data into a smaller set of discrete units, computes cluster centroids by averaging the coordinates of its member cells, and then forms the minimum spanning tree (MST) across those centroids.
 The MST is simply an undirected acyclic graph that passes through each centroid exactly once and can be thought of as the most parsimonious structure that captures the transitions between clusters.
-We demonstrate below on the Nestorowa dataset, computing the cluster centroids in the low-dimensional PC space to take advantage of data compaction and denoising (Chapter \@ref(dimensionality-reduction)).
+We demonstrate below on the @nestorowa2016singlecell dataset, computing the cluster centroids in the low-dimensional PC space to take advantage of data compaction and denoising (Chapter \@ref(dimensionality-reduction)).
 
 ```{r}
 library(scater)
 by.cluster <- aggregateAcrossCells(sce.nest, ids=colLabels(sce.nest))
 centroids <- reducedDim(by.cluster, "PCA")
 
-# Using an implementation of the TSCAN algorithm in scran:
-library(scran)
-mst <- createClusterMST(centroids)
+# Set clusters=NULL as we have already aggregated above.
+library(TSCAN)
+mst <- createClusterMST(centroids, clusters=NULL)
 mst
 ```
 
@@ -78,7 +78,8 @@ for the same reasons as discussed in Section \@ref(visualization-interpretation)
 this may occasionally result in some visually unappealing plots if the original ordering of clusters is not preserved in the plot.
 
 ```{r tscan-nest-tsne, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its cluster assignment. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
-line.data <- connectClusterMST(reducedDim(by.cluster, "TSNE"), mst=mst)
+line.data <- reportEdges(by.cluster, mst=mst, clusters=NULL, use.dimred="TSNE")
+
 plotTSNE(sce.nest, colour_by="label") + 
     geom_line(data=line.data, mapping=aes(x=dim1, y=dim2, group=edge))
 ```
@@ -93,8 +94,9 @@ Here, multiple sets of pseudotimes are reported for a branched trajectory where 
 to one path from the root node to one of the terminal nodes.
 
 ```{r tscan-nest-pseudo, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
-tscan.pseudo <- orderClusterMST(reducedDim(sce.nest, "PCA"), 
-    ids=colLabels(sce.nest), centers=centroids, mst=mst)
+map.tscan <- mapCellsToEdges(sce.nest, mst=mst, use.dimred="PCA")
+
+tscan.pseudo <- orderCells(map.tscan, mst)
 head(tscan.pseudo)
 
 # Taking the rowMeans just gives us a single pseudo-time for all cells. Cells
@@ -114,7 +116,7 @@ Alternatively, this entire series of calculations can be conveniently performed 
 This executes all steps from `aggregateAcrossCells()` to `orderClusterMST()` and returns a list with the output from each step.
 
 ```{r}
-pseudo.all <- quickPseudotime(sce.nest, use="PCA")
+pseudo.all <- quickPseudotime(sce.nest, use.dimred="PCA")
 head(pseudo.all$ordering)
 ```
 
@@ -128,7 +130,7 @@ We set `outgroup=TRUE` to introduce an outgroup with an automatically determined
 which breaks off up our previous MST into two components (Figure \@ref(fig:tscan-nest-omega)).
 
 ```{r tscan-nest-omega, fig.cap="Minimum spanning tree of the Nestorowa clusters after introducing an outgroup."}
-pseudo.og <- quickPseudotime(sce.nest, use="PCA", outgroup=TRUE)
+pseudo.og <- quickPseudotime(sce.nest, use.dimred="PCA", outgroup=TRUE)
 set.seed(10101)
 plot(pseudo.og$mst)
 ```
@@ -241,7 +243,7 @@ stopifnot(median(pseudo.paths3 - pseudo.paths, na.rm=TRUE) < 0.1)
 ```
 
 The MST can also be constructed with an OMEGA cluster to avoid connecting unrelated trajectories.
-This operates in the same manner as (and was the inspiration for) the outgroup for `r Biocpkg("scran")`'s MST,
+This operates in the same manner as (and was the inspiration for) the outgroup for `r Biocpkg("TSCAN")`'s MST,
 Principal curves are fitted through each component individually, 
 manifesting in the pseudotime matrix as paths that do not share any cells.
 
@@ -302,7 +304,7 @@ We then perform an analysis of variance (ANOVA) to determine if any of the splin
 i.e., there is some significant trend with respect to pseudotime.
 
 ```{r}
-library(scran)
+library(TSCAN)
 pseudo <- testPseudotime(sce.nest, pseudotime=tscan.pseudo[,1])
 pseudo$SYMBOL <- rowData(sce.nest)$SYMBOL
 pseudo[order(pseudo$p.value),]
@@ -402,9 +404,7 @@ allowing us to detect genes that are associated with the divergence of the branc
 
 ```{r}
 starter <- "3"
-tscan.pseudo2 <- orderClusterMST(reducedDim(sce.nest, "PCA"), 
-    ids=colLabels(sce.nest), centers=centroids, mst=mst, 
-    start=starter)
+tscan.pseudo2 <- orderCells(map.tscan, mst, start=starter)
 ```
 
 ```{r, echo=FALSE}
@@ -732,6 +732,7 @@ We run through the standard workflow for single-cell data with spike-ins -
 see Sections \@ref(spike-norm) and \@ref(sec:spikeins) for more details.
 
 ```{r}
+library(scran)
 sub.richard <- computeSpikeFactors(sub.richard, "ERCC")
 sub.richard <- logNormCounts(sub.richard)
 dec.richard <- modelGeneVarWithSpikes(sub.richard, "ERCC")

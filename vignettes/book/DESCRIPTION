@@ -67,5 +67,6 @@ Imports: AnnotationHub,
     TENxBrainData,
     TENxPBMCData,
     tradeSeq,
+    TSCAN,
     uwot,
     viridis

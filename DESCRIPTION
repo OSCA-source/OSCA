@@ -1,7 +1,7 @@
 Package: OSCA 
 Title: Compilation Wrapper for the OSCA Book
-Version: 0.99.8
-Date: 2020-09-16
+Version: 0.99.9
+Date: 2020-09-20
 Authors@R: person(role=c("aut", "cre"), "Aaron", "Lun", email = "infinite.monkeys.with.keyboards@gmail.com")
 Description: 
     Serves as a vehicle to compile the "Orchestrating Single-Cell Analyses with
@@ -71,5 +71,6 @@ Imports: AnnotationHub,
   TENxBrainData,
   TENxPBMCData,
   tradeSeq,
+  TSCAN,
   uwot,
   viridis
