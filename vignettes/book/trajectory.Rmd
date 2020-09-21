@@ -57,7 +57,7 @@ The choice between these two perspectives is left to the analyst based on which 
 
 The `r Biocpkg("TSCAN")` algorithm uses a simple yet effective approach to trajectory reconstruction.
 It uses the clustering to summarize the data into a smaller set of discrete units, computes cluster centroids by averaging the coordinates of its member cells, and then forms the minimum spanning tree (MST) across those centroids.
-The MST is simply an undirected acyclic graph that passes through each centroid exactly once and can be thought of as the most parsimonious structure that captures the transitions between clusters.
+The MST is simply an undirected acyclic graph that passes through each centroid exactly once and is thus the most parsimonious structure that captures the transitions between clusters.
 We demonstrate below on the @nestorowa2016singlecell dataset, computing the cluster centroids in the low-dimensional PC space to take advantage of data compaction and denoising (Chapter \@ref(dimensionality-reduction)).
 
 ```{r}
@@ -73,9 +73,9 @@ mst
 
 For reference, we can draw the same lines between the centroids in a $t$-SNE plot (Figure \@ref(fig:tscan-nest-tsne)).
 This allows us to identify interesting clusters such as those at bifurcations or endpoints.
-Note that the MST is generated from distances in the PC space and is merely being visualized in the $t$-SNE space,
-for the same reasons as discussed in Section \@ref(visualization-interpretation);
-this may occasionally result in some visually unappealing plots if the original ordering of clusters is not preserved in the plot.
+Note that the MST in `mst` was generated from distances in the PC space and is merely being visualized here in the $t$-SNE space,
+for the same reasons as discussed in Section \@ref(visualization-interpretation).
+This may occasionally result in some visually unappealing plots if the original ordering of clusters in the PC space is not preserved in the $t$-SNE space.
 
 ```{r tscan-nest-tsne, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its cluster assignment. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
 line.data <- reportEdges(by.cluster, mst=mst, clusters=NULL, use.dimred="TSNE")
@@ -84,21 +84,25 @@ plotTSNE(sce.nest, colour_by="label") +
     geom_line(data=line.data, mapping=aes(x=dim1, y=dim2, group=edge))
 ```
 
-We obtain a pseudotime ordering by projecting the cells onto the MST with `orderClusterMST()`.
+We obtain a pseudotime ordering by projecting the cells onto the MST with `mapCellsToEdges()`.
 More specifically, we move each cell onto the closest edge of the MST;
-the pseudotime is then calculated as the distance along the MST to this new position from a "root node".
+the pseudotime is then calculated as the distance along the MST to this new position from a "root node" with `orderCells()`.
 For our purposes, we will arbitrarily pick one of the endpoint nodes as the root,
 though a more careful choice based on the biological annotation of each node may yield more relevant orderings
 (e.g., picking a node corresponding to a more pluripotent state).
-Here, multiple sets of pseudotimes are reported for a branched trajectory where each ordering corresponds 
-to one path from the root node to one of the terminal nodes.
 
-```{r tscan-nest-pseudo, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
+```{r}
 map.tscan <- mapCellsToEdges(sce.nest, mst=mst, use.dimred="PCA")
-
 tscan.pseudo <- orderCells(map.tscan, mst)
 head(tscan.pseudo)
+```
 
+Here, multiple sets of pseudotimes are reported for a branched trajectory.
+Each column contains one pseudotime ordering and corresponds to one path from the root node to one of the terminal nodes - the name of the terminal node that defines this path is recorded in the column names of `tscan.pseudo`.
+Some cells may be shared across multiple paths, in which case they will have the same pseudotime in those paths.
+We can then examine the pseudotime ordering on our desired visualization as shown in Figure \@ref(fig:tscan-nest-pseudo).
+
+```{r tscan-nest-pseudo, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
 # Taking the rowMeans just gives us a single pseudo-time for all cells. Cells
 # in segments that are shared across paths have the same pseudo-time value for
 # those paths anyway, so the rowMeans doesn't change anything.
@@ -113,7 +117,7 @@ stopifnot(ncol(tscan.pseudo) > 1L)
 ```
 
 Alternatively, this entire series of calculations can be conveniently performed with the `quickPseudotime()` wrapper.
-This executes all steps from `aggregateAcrossCells()` to `orderClusterMST()` and returns a list with the output from each step.
+This executes all steps from `aggregateAcrossCells()` to `orderCells()` and returns a list with the output from each step.
 
 ```{r}
 pseudo.all <- quickPseudotime(sce.nest, use.dimred="PCA")
@@ -124,10 +128,10 @@ The MST can also be constructed with an "outgroup" to avoid connecting unrelated
 Based on the OMEGA cluster concept from @street2018slingshot,
 the outgroup is an artificial cluster that is equidistant from all real clusters at some threshold value.
 If the original MST _sans_ the outgroup contains an edge that is longer than twice the threshold,
-the MST computed with the edge will instead be routed through the outgroup.
+the addition of the outgroup will cause the MST to instead be routed through the outgroup.
 We can subsequently break up the MST into subcomponents (i.e., a minimum spanning forest) by removing the outgroup.
 We set `outgroup=TRUE` to introduce an outgroup with an automatically determined threwshold distance,
-which breaks off up our previous MST into two components (Figure \@ref(fig:tscan-nest-omega)).
+which breaks up our previous MST into two components (Figure \@ref(fig:tscan-nest-omega)).
 
 ```{r tscan-nest-omega, fig.cap="Minimum spanning tree of the Nestorowa clusters after introducing an outgroup."}
 pseudo.og <- quickPseudotime(sce.nest, use.dimred="PCA", outgroup=TRUE)
@@ -136,7 +140,7 @@ plot(pseudo.og$mst)
 ```
 
 ```{r, echo=FALSE}
-stopifnot(length(igraph::components(pseudo.og$mst)) > 1)
+stopifnot(igraph::components(pseudo.og$mst)$no == 2)
 ```
 
 The `r Biocpkg("TSCAN")` approach derives several advantages from using clusters to form the MST.
@@ -148,7 +152,7 @@ allowing us to recycle previous knowledge about the biological annotations assig
 However, the reliance on clustering is a double-edged sword.
 If the clusters are not sufficiently granular, 
 it is possible for `r Biocpkg("TSCAN")` to overlook variation that occurs inside a single cluster.
-The MST is obliged to pass through each cluster exactly once, which can lead to excessively circuitous paths in overclustered datasets as well as the formation of irrelevant paths between distinct cell subpopulations.
+The MST is obliged to pass through each cluster exactly once, which can lead to excessively circuitous paths in overclustered datasets as well as the formation of irrelevant paths between distinct cell subpopulations if the outgroup threshold is too high.
 The MST also fails to handle more complex events such as "bubbles" (i.e., a bifurcation and then a merging) or cycles.
 
 ### Principal curves
@@ -243,7 +247,7 @@ stopifnot(median(pseudo.paths3 - pseudo.paths, na.rm=TRUE) < 0.1)
 ```
 
 The MST can also be constructed with an OMEGA cluster to avoid connecting unrelated trajectories.
-This operates in the same manner as (and was the inspiration for) the outgroup for `r Biocpkg("TSCAN")`'s MST,
+This operates in the same manner as (and was the inspiration for) the outgroup for `r Biocpkg("TSCAN")`'s MST.
 Principal curves are fitted through each component individually, 
 manifesting in the pseudotime matrix as paths that do not share any cells.
 
@@ -272,7 +276,7 @@ stopifnot(all(is.na(pseudo.paths4[,2]) | is.na(pseudo.paths4[,3])))
 
 The use of principal curves adds an extra layer of sophistication that complements the deficiencies of the cluster-based MST.
 The principal curve has the opportunity to model variation within clusters that would otherwise be overlooked;
-for example, `r Biocpkg("slingshot")` could build a trajectory out of one cluster while a _TSCAN_-like algorithm cannot.
+for example, `r Biocpkg("slingshot")` could build a trajectory out of one cluster while `r Biocpkg("TSCAN")` cannot.
 Conversely, the principal curves can "smooth out" circuitous paths in the MST for overclustered data,
 ignoring small differences between fine clusters that are unlikely to be relevant to the overall trajectory.
 
@@ -293,11 +297,11 @@ as these are the most likely to have driven the formation of the trajectory in t
 The overall strategy is to fit a model to the per-gene expression with respect to pseudotime,
 allowing us to obtain inferences about the significance of any association.
 We can then prioritize interesting genes as those with low $p$-values for further investigation.
-A diversity of options are available for model fitting but we will focus on the simplest strategy of fitting a linear model to the log-expression values with respect to the pseudotime; we will discuss some of the more advanced models later.
+A wide range of options are available for model fitting but we will focus on the simplest approach of fitting a linear model to the log-expression values with respect to the pseudotime; we will discuss some of the more advanced models later.
 
 ### Changes along a trajectory
 
-To demonstrate, we will identify genes with significant changes with respect to one of the TSCAN pseudotimes in the Nestorowa data.
+To demonstrate, we will identify genes with significant changes with respect to one of the `r Biocpkg("TSCAN")` pseudotimes in the Nestorowa data.
 We use the `testPseudotime()` utility to fit a natural spline to the expression of each gene,
 allowing us to model a range of non-linear relationships in the data.
 We then perform an analysis of variance (ANOVA) to determine if any of the spline coefficients are significantly non-zero,
@@ -310,11 +314,11 @@ pseudo$SYMBOL <- rowData(sce.nest)$SYMBOL
 pseudo[order(pseudo$p.value),]
 ```
 
-In practice, it is helpful to pair the ANOVA results with a fit from a much simpler model
+In practice, it is helpful to pair the spline-based ANOVA results with a fit from a much simpler model
 where we assume that there exists a linear relationship between expression and the pseudotime.
 This yields an interpretable summary of the overall direction of change in the `logFC` field above,
 complementing the more poweful spline-based model used to populate the `p.value` field.
-(In contrast, the magnitude and sign of the spline coefficients cannot be easily interpreted.)
+In contrast, the magnitude and sign of the spline coefficients cannot be easily interpreted.
 
 ```{r, echo=FALSE}
 offender <- "7"
@@ -325,13 +329,22 @@ stopifnot(sum(grepl("Ig", head(pseudo$SYMBOL[o], 20))) > 5)
 To simplify the results, we will repeat our DE analysis after filtering out cluster `r offender`.
 This cluster seems to contain a set of B cell precursors that are located at one end of the trajectory,
 causing immunoglobulins to dominate the set of DE genes and mask other interesting effects.
-(Incidentally, this is the same cluster that was split into a separate component in the outgroup-based MST.)
+Incidentally, this is the same cluster that was split into a separate component in the outgroup-based MST.
 
 ```{r}
+# Making a copy of our SCE and including the pseudotimes in the colData.
+sce.nest2 <- sce.nest
+sce.nest2$TSCAN.first <- tscan.pseudo[,1]
+sce.nest2$TSCAN.second <- tscan.pseudo[,2]
+
+# Discarding the offending cluster.
 discard <- "7"
 keep <- colLabels(sce.nest)!=discard
-pseudo <- testPseudotime(sce.nest[,keep], pseudotime=tscan.pseudo[keep,1])
-pseudo$SYMBOL <- rowData(sce.nest)$SYMBOL
+sce.nest2 <- sce.nest2[,keep]
+
+# Testing against the first path again.
+pseudo <- testPseudotime(sce.nest2, pseudotime=sce.nest2$TSCAN.first)
+pseudo$SYMBOL <- rowData(sce.nest2)$SYMBOL
 sorted <- pseudo[order(pseudo$p.value),]
 ```
 
@@ -348,9 +361,9 @@ based on the decrease in expression of genes such as _Mpo_ and _Plac8_ (Figure \
 ```{r nest-1-simple-down, fig.asp=3, fig.width=6, fig.cap="Expression of the top 10 genes that decrease in expression with increasing pseudotime along the first path in the MST of the Nestorowa dataset. Each point represents a cell that is mapped to this path and is colored by the assigned cluster."}
 up.left <- sorted[sorted$logFC < 0,]
 head(up.left, 10)
-best <- head(rownames(up.left), 10)
-plotExpression(sce.nest, features=best,
-    x=I(tscan.pseudo[,1]), colour_by="label")
+best <- head(up.left$SYMBOL, 10)
+plotExpression(sce.nest2, features=best, swap_rownames="SYMBOL",
+    x="TSCAN.first", colour_by="label")
 ```
 
 ```{r, echo=FALSE, results="hide"}
@@ -364,9 +377,9 @@ consistent with reduced commitment to the myeloid lineage at earlier pseudotime 
 ```{r nest-1-simple-up, fig.asp=3, fig.width=6, fig.cap="Expression of the top 10 genes that increase in expression with increasing pseudotime along the first path in the MST of the Nestorowa dataset. Each point represents a cell that is mapped to this path and is colored by the assigned cluster."}
 up.right <- sorted[sorted$logFC > 0,]
 head(up.right, 10)
-best <- head(rownames(up.right), 10)
-plotExpression(sce.nest, features=best, 
-    x=I(tscan.pseudo[,1]), colour_by="label")
+best <- head(up.right$SYMBOL, 10)
+plotExpression(sce.nest2, features=best, swap_rownames="SYMBOL",
+    x="TSCAN.first", colour_by="label")
 ```
 
 ```{r, echo=FALSE, results="hide"}
@@ -382,25 +395,48 @@ stopifnot(all(c("Hlf", "Ltb") %in% head(up.right$SYMBOL, 10)))
 #    cellWeights=rep(1, sum(keep)))
 ```
 
+Alternatively, a heatmap can be used to provide a more compact visualization (Figure \@ref(fig:nest-1-simple-up-heat)).
+
+```{r nest-1-simple-up-heat, fig.width=6, fig.height=7, fig.cap="Heatmap of the expression of the top 50 genes that increase in expression with increasing pseudotime along the first path in the MST of the Nestorowa HSC dataset. Each column represents a cell that is mapped to this path and is ordered by its pseudotime value."}
+on.first.path <- !is.na(sce.nest2$TSCAN.first)
+plotHeatmap(sce.nest2[,on.first.path], order_columns_by="TSCAN.first", 
+    colour_columns_by="label", features=head(up.right$SYMBOL, 50),
+    center=TRUE, swap_rownames="SYMBOL")
+```
+
 ### Changes between paths
 
 A more advanced analysis involves looking for differences in expression between paths of a branched trajectory.
-This is most interesting for cells close to the branch point between two or more paths
-where the differential expression analysis may highlight genes is responsible for the branching event.
-The general strategy here is to fit one trend to the unique part of each path immediately following the branch point,
-followed by a comparison of the fits between paths.
+This is most interesting for cells close to the branch point between two or more paths where the differential expression analysis may highlight genes is responsible for the branching event.
+The general strategy here is to fit one trend to the unique part of each path immediately following the branch point, followed by a comparison of the fits between paths.
 
-To this end, a particularly tempting approach is to perform another ANOVA with our spline-based model
-and test for significant differences in the spline parameters between paths.
-While this can be done with `testPseudotime()`, 
-we do not do so because the magnitude of the pseudotime has little meaning across lineages.
-A pseudotime value in one path of the MST does not, in general, have any relation to the same value in another path;
-this compromises any comparison of trends as we cannot reliably say that they are being fitted to comparable $x$-axes. 
+To this end, a particularly tempting approach is to perform another ANOVA with our spline-based model and test for significant differences in the spline parameters between paths.
+While this can be done with `testPseudotime()`, the magnitude of the pseudotime has little comparability across paths.
+A pseudotime value in one path of the MST does not, in general, have any relation to the same value in another path; the pseudotime can be arbitrarily "stretched" by factors such as the magnitude of DE or the density of cells, depending on the algorithm.
+This compromises any comparison of trends as we cannot reliably say that they are being fitted to comparable $x$-axes. 
+
+```{r, echo=FALSE, eval=FALSE}
+# Here's an example for y'all. We consider a branch from clusters 1 to 2/3.
+# Gene A increases in expression at the same rate in both paths; gene B
+# increases in only one path, introducing a change in pseudotime magnitude.
+clusters <- gl(3, 1000)
+mat <- cbind(
+    GeneA=c(integer(1000), 1:1000/500, 1:1000/500),
+    GeneB=c(integer(1000), 1:1000/100, integer(1000))
+)
+mat <- mat + rnorm(length(mat), sd=0.1)
+
+test <- slingshot(mat, cluster=clusters, approx_points=100, start.clus=1)
+test.paths <- slingPseudotime(test)
+
+# Note the differences in the gradients:
+(fit1 <- lm(mat[clusters==2,1] ~ 0 + test.paths[clusters==2,1]))
+(fit2 <- lm(mat[clusters==3,1] ~ 0 + test.paths[clusters==3,2]))
+```
 
 Rather, we employ the much simpler _ad hoc_ approach of fitting a spline to each trajectory and comparing the sets of DE genes.
-To demonstrate, we focus on the cluster containing the branch point in the Nestorowa-derived MST.
-We recompute the pseudotimes so that changes in expression are detected with respect to separation of paths from each other,
-allowing us to detect genes that are associated with the divergence of the branches.
+To demonstrate, we focus on the cluster containing the branch point in the Nestorowa-derived MST (Figure \@ref(fig:tscan-nest-pseudo)).
+We recompute the pseudotimes so that the root lies at the cluster center, allowing us to detect genes that are associated with the divergence of the branches.
 
 ```{r}
 starter <- "3"
@@ -411,32 +447,51 @@ tscan.pseudo2 <- orderCells(map.tscan, mst, start=starter)
 stopifnot(igraph::degree(mst, starter) == 3)
 ```
 
+We visualize the reordered pseudotimes using only the cells in our branch point cluster (Figure \@ref(fig:nest-pseudo-reordered)), which allows us to see the correspondence between each pseudotime to the projected edges of the MST.
+A more precise determination of the identity of each pseudotime can be achieved by examining the column names of `tscan.pseudo2`, which contains the name of the terminal node for the path of the MST corresponding to each column.
+
+```{r nest-pseudo-reordered, fig.width=10, fig.height=5, fig.cap=sprintf("_TSCAN_-derived pseudotimes around cluster %s in the Nestorowa HSC dataset. Each point is a cell in this cluster and is colored by its pseudotime value along the path to which it was assigned. The overlaid lines represent the relevant edges of the MST.", starter)}
+# Making a copy and giving the paths more friendly names.
+sub.nest <- sce.nest
+sub.nest$TSCAN.first <- tscan.pseudo2[,1]
+sub.nest$TSCAN.second <- tscan.pseudo2[,2]
+sub.nest$TSCAN.third <- tscan.pseudo2[,3]
+
+# Subsetting to the desired cluster containing the branch point.
+keep <- colLabels(sce.nest) == starter
+sub.nest <- sub.nest[,keep]
+
+# Showing only the lines to/from our cluster of interest.
+line.data.sub <- line.data[grepl("^3--", line.data$edge) | grepl("--3$", line.data$edge),]
+ggline <- geom_line(data=line.data.sub, mapping=aes(x=dim1, y=dim2, group=edge))
+
+gridExtra::grid.arrange(
+    plotTSNE(sub.nest, colour_by="TSCAN.first") + ggline,
+    plotTSNE(sub.nest, colour_by="TSCAN.second") + ggline,
+    plotTSNE(sub.nest, colour_by="TSCAN.third") + ggline,
+    ncol=3
+)
+```
+
 We then apply `testPseudotime()` to each path involving cluster `r starter`.
-We subset our analysis to only that cluster's cells so as to focus on DE events close to the branch point.
-Because we are operating over a relatively short pseudotime interval, we do not expect complex trends
-and so we set `df=1` (i.e., a linear trend) to avoid problems from overfitting. 
+Because we are operating over a relatively short pseudotime interval, we do not expect complex trends and so we set `df=1` (i.e., a linear trend) to avoid problems from overfitting. 
 
 ```{r}
-keep <- colLabels(sce.nest) == starter
-sub.nest <- sce.nest[,keep]
-
-pseudo1 <- testPseudotime(sub.nest, df=1, pseudotime=tscan.pseudo2[keep,1])
+pseudo1 <- testPseudotime(sub.nest, df=1, pseudotime=sub.nest$TSCAN.first)
 pseudo1$SYMBOL <- rowData(sce.nest)$SYMBOL
 pseudo1[order(pseudo1$p.value),]
 
-pseudo2 <- testPseudotime(sub.nest, df=1, pseudotime=tscan.pseudo2[keep,2])
+pseudo2 <- testPseudotime(sub.nest, df=1, pseudotime=sub.nest$TSCAN.second)
 pseudo2$SYMBOL <- rowData(sce.nest)$SYMBOL
 pseudo2[order(pseudo2$p.value),]
 
-pseudo3 <- testPseudotime(sub.nest, df=1, pseudotime=tscan.pseudo2[keep,3])
+pseudo3 <- testPseudotime(sub.nest, df=1, pseudotime=sub.nest$TSCAN.third)
 pseudo3$SYMBOL <- rowData(sce.nest)$SYMBOL
 pseudo3[order(pseudo3$p.value),]
 ```
 
-We informally compare these results by looking for genes that are significant 
-in our path of interest and are not significant or changing in the opposite direction in the other paths.
-We use the raw $p$-values to look for non-significant genes 
-in order to increase the stringency of the definition of unique genes in our path.
+We want to find genes that are significant in our path of interest (for this demonstration, the third path reported by `r Biocpkg("TSCAN")`) and are not significant and/or changing in the opposite direction in the other paths.
+We use the raw $p$-values to look for non-significant genes in order to increase the stringency of the definition of unique genes in our path.
 
 ```{r}
 only3 <- pseudo3[which(pseudo3$FDR <= 0.05 & 
@@ -450,21 +505,11 @@ along with downregulation of _Flt3_ (Figure \@ref(fig:nest-3-versus)).
 One might speculate that this path leads to a less differentiated HSC state compared to the other directions.
 
 ```{r nest-3-versus, fig.asp=1, fig.width=6, fig.cap="$t$-SNE plots of cells in the cluster containing the branch point of the MST in the Nestorowa dataset. Each point is a cell colored by the expression of a gene of interest and the relevant edges of the MST are overlaid on top."}
-# Showing only the lines to/from our cluster of interest.
-line.data.sub <- line.data[grepl("^3--", line.data$edge) |
-    grepl("--3$", line.data$edge),]
-ggline <- geom_line(data=line.data.sub, 
-    mapping=aes(x=dim1, y=dim2, group=edge))
-
 gridExtra::grid.arrange(
-    plotTSNE(sub.nest, colour_by="ENSMUSG00000042817") + 
-        ggtitle("Flt3") + ggline,
-    plotTSNE(sub.nest, colour_by="ENSMUSG00000002985") + 
-        ggtitle("Apoe") + ggline,
-    plotTSNE(sub.nest, colour_by="ENSMUSG00000015053") + 
-        ggtitle("Gata2") + ggline,
-    plotTSNE(sub.nest, colour_by="ENSMUSG00000030342") + 
-        ggtitle("Cd9") + ggline
+    plotTSNE(sub.nest, colour_by="Flt3", swap_rownames="SYMBOL") + ggline,
+    plotTSNE(sub.nest, colour_by="Apoe", swap_rownames="SYMBOL") + ggline,
+    plotTSNE(sub.nest, colour_by="Gata2", swap_rownames="SYMBOL") + ggline,
+    plotTSNE(sub.nest, colour_by="Cd9", swap_rownames="SYMBOL") + ggline
 )
 ```
 
