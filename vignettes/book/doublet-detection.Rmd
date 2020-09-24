@@ -41,37 +41,26 @@ sce.mam
 
 ## Doublet detection with clusters
 
-The `doubletCluster()` function identifies clusters with expression profiles lying between two other clusters [@bach2017differentiation].
+The `findDoubletClusters()` function from the `r Biocpkg("scDblFinder")` package identifies clusters with expression profiles lying between two other clusters [@bach2017differentiation].
 We consider every possible triplet of clusters consisting of a query cluster and two putative "source" clusters.
-Under the null hypothesis that the query consists of doublets from the two sources, we then compute a number of statistics:
-
-- The number of genes (`N`) that are differentially expressed in the same direction in the query cluster compared to _both_ of the source clusters.
+Under the null hypothesis that the query consists of doublets from the two sources, we compute the number of genes (`num.de`) that are differentially expressed in the same direction in the query cluster compared to _both_ of the source clusters.
 Such genes would be unique markers for the query cluster and provide evidence against the null hypothesis.
-Clusters with few unique genes are more likely to be composed of doublets.
-- The ratio of the median library size in each source to the median library size in the query (`lib.size` fields).
-Doublet libraries are generated from a larger initial pool of RNA compared to libraries for single cells, and thus the former should have larger library sizes.
-Library size ratios much greater than unity are inconsistent with a doublet identity for the query.
-- The proportion of cells in the query cluster should also be reasonable - typically less than 5% of all cells, depending on how many cells were loaded onto the 10X Genomics device.
-
-For each query cluster, the best pair of sources is identified based solely on the lowest `N`.
-(This means that any `lib.size*` above unity is not definitive evidence against a doublet identity for a query cluster, as there may be a pair of sources with slightly higher `N` but both `lib.size*` values below unity.)
-If more detail is necessary, the `all.pairs` field contains statistics on all possible source pairs for a given query cluster.
+For each query cluster, the best pair of putative sources is identified based on the lowest `num.de`.
+Clusters are then ranked by `num.de` where those with the few unique genes are more likely to be composed of doublets.
 
 ```{r}
 # Like 'findMarkers', this function will automatically
 # retrieve cluster assignments from 'colLabels'.
-library(scran)
-dbl.out <- doubletCluster(sce.mam)
+library(scDblFinder)
+dbl.out <- findDoubletClusters(sce.mam)
 dbl.out
 ```
 
-Clusters are then ranked by `N` in the output of `doubletClusters()`, allowing us to prioritize high-risk clusters that require careful investigation.
-If a more concrete threshold is necessary, we can identify clusters that have unusually low `N` using an outlier-based approach. 
+If a more concrete threshold is necessary, we can identify clusters that have unusually low `num.de` using an outlier-based approach. 
 
 ```{r}
 library(scater)
-chosen.doublet <- rownames(dbl.out)[isOutlier(dbl.out$N, 
-    type="lower", log=TRUE)]
+chosen.doublet <- rownames(dbl.out)[isOutlier(dbl.out$num.de, type="lower", log=TRUE)]
 chosen.doublet
 ```
 
@@ -81,10 +70,15 @@ chosen.doublet
 stopifnot(length(chosen.doublet)==1L)
 ```
 
-Examination of the output of `doubletCluster()` indicates that cluster `r chosen.doublet` has the fewest unique genes and library sizes that are comparable to or greater than its sources.
+The function also reports the ratio of the median library size in each source to the median library size in the query (`lib.size` fields).
+Ideally, a potential doublet cluster would have ratios lower than unity; this is because doublet libraries are generated from a larger initial pool of RNA compared to libraries for single cells, and thus the former should have larger library sizes.
+The proportion of cells in the query cluster should also be reasonable - typically less than 5% of all cells, depending on how many cells were loaded onto the 10X Genomics device.
+
+Examination of the `findDoubletClusters()` output indicates that cluster `r chosen.doublet` has the fewest unique genes and library sizes that are comparable to or greater than its sources.
 We see that every gene detected in this cluster is also expressed in either of the two proposed source clusters (Figure \@ref(fig:heatclust)).
 
 ```{r heatclust, fig.cap=sprintf("Heatmap of mean-centered and normalized log-expression values for the top set of markers for cluster %s in the mammary gland dataset. Column colours represent the cluster to which each cell is assigned, as indicated by the legend.", chosen.doublet)}
+library(scran)
 markers <- findMarkers(sce.mam, direction="up")
 dbl.markers <- markers[[chosen.doublet]]
 
@@ -114,7 +108,7 @@ plotExpression(sce.mam, features=c("Acta2", "Csn2"),
     x="label", colour_by="label")
 ```
 
-The strength of `doubletCluster()` lies in its simplicity and ease of interpretation.
+The strength of `findDoubletClusters()` lies in its simplicity and ease of interpretation.
 Suspect clusters can be quickly flagged based on the metrics returned by the function.
 However, it is obviously dependent on the quality of the clustering.
 Clusters that are too coarse will fail to separate doublets from other cells, while clusters that are too fine will complicate interpretation.
@@ -124,7 +118,7 @@ The method is also somewhat biased towards clusters with fewer cells, where the 
 ## Doublet detection by simulation {#doublet-simulation}
 
 The other doublet detection strategy involves _in silico_ simulation of doublets from the single-cell expression profiles [@dahlin2018single].
-This is performed using the `doubletCells()` function from `r Biocpkg("scran")`, which will:
+This is performed using the `computeDoubletDensity()` function from `r Biocpkg("scran")`, which will:
 
 1. Simulate thousands of doublets by adding together two randomly chosen single-cell profiles.
 2. For each original cell, compute the density of simulated doublets in the surrounding neighborhood.
@@ -136,7 +130,7 @@ The use of random selection accounts for the relative abundances of different su
 and the calculation of a ratio avoids high scores for non-doublet cells in highly abundant subpopulations.
 
 We see the function in action below.
-To speed up the density calculations, `doubletCells()` will perform a PCA on the log-expression matrix, and we perform some (optional) parametrization to ensure that the computed PCs are consistent with that from our previous analysis on this dataset.
+To speed up the density calculations, `computeDoubletDensity()` will perform a PCA on the log-expression matrix, and we perform some (optional) parametrization to ensure that the computed PCs are consistent with that from our previous analysis on this dataset.
 
 ```{r}
 library(BiocSingular)
@@ -144,7 +138,7 @@ set.seed(100)
 
 # Setting up the parameters for consistency with denoisePCA();
 # this can be changed depending on your feature selection scheme.
-dbl.dens <- doubletCells(sce.mam, subset.row=top.mam, 
+dbl.dens <- computeDoubletDensity(sce.mam, subset.row=top.mam, 
     d=ncol(reducedDim(sce.mam)))
 summary(dbl.dens)
 ```
@@ -152,19 +146,19 @@ summary(dbl.dens)
 The highest doublet scores are concentrated in a single cluster of cells in the center of Figure \@ref(fig:denstsne).
 
 ```{r denstsne, fig.cap="t-SNE plot of the mammary gland data set. Each point is a cell coloured according to its doublet density."}
-sce.mam$DoubletScore <- log10(dbl.dens+1)
+sce.mam$DoubletScore <- dbl.dens
 plotTSNE(sce.mam, colour_by="DoubletScore")
 ```
 
-From the clustering information, we see that the affected cells belong to the same cluster that was identified using `doubletCluster()` (Figure \@ref(fig:densclust)), which is reassuring.
+From the clustering information, we see that the affected cells belong to the same cluster that was identified using `findDoubletClusters()` (Figure \@ref(fig:densclust)), which is reassuring.
 
 ```{r densclust, fig.cap="Distribution of doublet scores for each cluster in the mammary gland data set. Each point is a cell."}
 plotColData(sce.mam, x="label", y="DoubletScore", colour_by="label")
 ```
 
-The advantage of `doubletCells()` is that it does not depend on clusters, reducing the sensitivity of the results to clustering quality.
+The advantage of `computeDoubletDensity()` is that it does not depend on clusters, reducing the sensitivity of the results to clustering quality.
 The downside is that it requires some strong assumptions about how doublets form, such as the combining proportions and the sampling from pure subpopulations.
-In particular, `doubletCells()` treats the library size of each cell as an accurate proxy for its total RNA content.
+In particular, `computeDoubletDensity()` treats the library size of each cell as an accurate proxy for its total RNA content.
 If this is not true, the simulation will not combine expression profiles from different cells in the correct proportions.
 This means that the simulated doublets will be systematically shifted away from the real doublets, resulting in doublet scores that are too low.
 
@@ -173,14 +167,14 @@ In some cases, only a subset of the cells in the putative doublet cluster actual
 In fact, even defining a threshold on the doublet score is difficult as the interpretation of the score is relative.
 There is no general definition for a fixed threshold above which libraries are to be considered doublets.
 
-We recommend interpreting the `doubletCells()` scores in the context of cluster annotation.
+We recommend interpreting the `computeDoubletDensity()` scores in the context of cluster annotation.
 All cells from a cluster with a large average doublet score should be considered suspect, and close neighbors of problematic clusters should also be treated with caution.
 In contrast, a cluster containing a small proportion of high-scoring cells is probably safe provided that any interesting results are not being driven by those cells (e.g., checking that DE in an interesting gene is not driven solely by cells with high doublet scores).
-While clustering is still required, this approach is more robust than `doubletClusters()` to the quality of the clustering as the scores are computed on a per-cell basis.
+While clustering is still required, this approach is more robust than `findDoubletClusters()` to the quality of the clustering as the scores are computed on a per-cell basis.
 
 (As an aside, the issue of unknown combining proportions can be solved completely if spike-in information is available, e.g., in plate-based protocols.
 This will provide an accurate estimate of the total RNA content of each cell.
-To this end, spike-in-based size factors from Section \@ref(spike-norm) can be supplied to the `doubletCells()` function via the `size.factors.content=` argument.
+To this end, spike-in-based size factors from Section \@ref(spike-norm) can be supplied to the `computeDoubletDensity()` function via the `size.factors.content=` argument.
 This will use the spike-in size factors to scale the contribution of each cell to a doublet library.)
 
 ## Doublet detection in multiplexed experiments
@@ -292,7 +286,7 @@ Unlike in Section \@ref(doublet-simulation), the use of experimentally derived d
 
 ```{r}
 # Performing a quick-and-dirty analysis to get some PCs to use
-# for nearest neighbor detection inside doubletRecovery().
+# for nearest neighbor detection inside recoverDoublets().
 library(scran)
 sce.hash <- logNormCounts(sce.hash)
 dec.hash <- modelGeneVar(sce.hash)
@@ -301,12 +295,12 @@ set.seed(1011110)
 sce.hash <- runPCA(sce.hash, subset_row=top.hash, ncomponents=20)
 
 # Recovering the intra-sample doublets:
-hashed.doublets <- doubletRecovery(sce.hash, use.dimred="PCA",
+hashed.doublets <- recoverDoublets(sce.hash, use.dimred="PCA",
     doublets=sce.hash$Doublet, samples=table(sce.hash$Best))
 hashed.doublets
 ```
 
-The `doubletRecovery()` function also returns explicit intra-sample doublet predictions based on the doublet neighbor proportions.
+The `recoverDoublets()` function also returns explicit intra-sample doublet predictions based on the doublet neighbor proportions.
 Given the distribution of cells across multiplexed samples in `samples=`, we estimate the fraction of doublets that would not be observed from the HTO counts.
 This is converted into an absolute number based on the number of observed doublets; the top set of libraries with the highest proportions are then marked as intra-sample doublets (Figure \@ref(fig:tsne-hash))
 
@@ -349,8 +343,8 @@ This avoids unnecessary concerns about the validity of batch-specific clusters t
 
 It is also difficult to interpret doublet predictions in data containing cellular trajectories.
 By definition, cells in the middle of a trajectory are always intermediate between other cells and are liable to be incorrectly detected as doublets.
-Some protection is provided by the non-linear nature of many real trajectories, which reduces the risk of simulated doublets coinciding with real cells in `doubletCells()`.
-One can also put more weight on the relative library sizes in `doubletCluster()` instead of relying solely on `N`, 
+Some protection is provided by the non-linear nature of many real trajectories, which reduces the risk of simulated doublets coinciding with real cells in `computeDoubletDensity()`.
+One can also put more weight on the relative library sizes in `findDoubletClusters()` instead of relying solely on `N`, 
 under the assumption that sudden spikes in RNA content are unlikely in a continuous biological process.
 
 The best solution to the doublet problem is experimental - that is, to avoid generating them in the first place.
