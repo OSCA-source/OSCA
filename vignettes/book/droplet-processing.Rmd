@@ -143,14 +143,14 @@ Nonetheless, it may still be desirable to load the **unfiltered** matrix and app
 
 ### Background
 
-Cell hashing [@stoekius2018hashing] is a useful technique that allows cells from different samples to be processed in a single run of a droplet-based protocol.
+Cell hashing [@stoeckius2018hashing] is a useful technique that allows cells from different samples to be processed in a single run of a droplet-based protocol.
 Cells from a single sample are first labelled with a unique hashing tag oligo (HTOs), usually via conjugation of the HTO to an antibody against a ubiquitous surface marker or a membrane-binding compound like cholesterol [@mcginnis2019multiseq].
 Cells from different samples are then mixed together and the multiplexed pool is used for droplet-based library preparation; each cell is assigned back to its sample of origin based on its most abundant HTO.
 By processing multiple samples together, we can avoid batch effects and simplify the logistics of studies with a large number of samples.
 
 Sequencing of the HTO-derived cDNA library yields a count matrix where each row corresponds to a HTO and each column corresponds to a cell barcode.
 This can be stored as an alternative Experiment in our `SingleCellExperiment`, alongside the main experiment containing the counts for the actual genes.
-We demonstrate on some data from the original @stoekius2018hashing study, which contains counts for a mixture of 4 cell lines across 12 samples.
+We demonstrate on some data from the original @stoeckius2018hashing study, which contains counts for a mixture of 4 cell lines across 12 samples.
 
 ```{r}
 library(scRNAseq)

@@ -22,7 +22,7 @@ Thus, it is desirable to identify and remove doublet libraries so that they do n
 Several experimental strategies are available for doublet removal.
 One approach exploits natural genetic variation when pooling cells from multiple donor individuals [@kang2018multiplexed].
 Doublets can be identified as libraries with allele combinations that do not exist in any single donor.
-Another approach is to mark a subset of cells (e.g., all cells from one sample) with an antibody conjugated to a different oligonucleotide [@stoeckius2017hashing].
+Another approach is to mark a subset of cells (e.g., all cells from one sample) with an antibody conjugated to a different oligonucleotide [@stoeckius2018hashing].
 Upon pooling, libraries that are observed to have different oligonucleotides are considered to be doublets and removed.
 These approaches can be highly effective but rely on experimental information that may not be available.
 
@@ -181,13 +181,13 @@ This will use the spike-in size factors to scale the contribution of each cell t
 
 ### Background
 
-For multiplexed samples [@kang2018multiplexed;@stoekius2018hashing], we can identify doublet cells based on the cells that have multiple labels.
+For multiplexed samples [@kang2018multiplexed;@stoeckius2018hashing], we can identify doublet cells based on the cells that have multiple labels.
 The idea here is that cells from the same sample are labelled in a unique manner, either implicitly with genotype information or experimentally with hashing tag oligos (HTOs).
 Cells from all samples are then mixed together and the multiplexed pool is subjected to scRNA-seq, avoiding batch effects and simplifying the logistics of processing a large number of samples.
 Importantly, most per-cell libraries are expected to contain one label that can be used to assign that cell to its sample of origin.
 Cell libraries containing two labels are thus likely to be doublets of cells from different samples. 
 
-To demonstrate, we will use some data from the original cell hashing study [@stoekius2018hashing].
+To demonstrate, we will use some data from the original cell hashing study [@stoeckius2018hashing].
 Each sample's cells were stained with an antibody against a ubiquitous surface protein, where the antibody was conjugated to a sample-specific HTO.
 Sequencing of the HTO-derived cDNA library ultimately yields a count matrix where each row corresponds to a HTO and each column corresponds to a cell barcode.
 

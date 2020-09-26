@@ -210,8 +210,9 @@ This is usually reasonable and can be experimentally supported in some situation
 If most cells are of (unacceptably) low quality, the adaptive thresholds will obviously fail as they cannot remove the majority of cells.
 Of course, what is acceptable or not is in the eye of the beholder - neurons, for example, are notoriously difficult to dissociate, and we would often retain cells in a neuronal scRNA-seq dataset with QC metrics that would be unacceptable in a more amenable system like embryonic stem cells.
 
-Another assumption discussed earlier is that the QC metrics are independent of the biological state of each cell.
-This assumption is most likely to be violated in highly heterogeneous cell populations where cell types that naturally have less RNA or more mitochondria are more likely to be considered outliers and removed, even if they are of high quality.
+Another assumption mentioned earlier is that the QC metrics are independent of the biological state of each cell.
+This is most likely to be violated in highly heterogeneous cell populations where some cell types naturally have, e.g., less total RNA (see Figure 3A of @germain2020pipecomp) or more mitochondria.
+Such cells are more likely to be considered outliers and removed, even in the absence of any technical problems with their capture or sequencing.
 The use of the MAD mitigates this problem to some extent by accounting for biological variability in the QC metrics.
 A heterogeneous population should have higher variability in the metrics among high-quality cells, increasing the MAD and reducing the chance of incorrectly removing particular cell types (at the cost of reducing power to remove low-quality cells).
 
