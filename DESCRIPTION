@@ -1,6 +1,6 @@
 Package: OSCA 
 Title: Compilation Wrapper for the OSCA Book
-Version: 0.99.12
+Version: 0.99.13
 Date: 2020-09-26
 Authors@R: person(role=c("aut", "cre"), "Aaron", "Lun", email = "infinite.monkeys.with.keyboards@gmail.com")
 Description: 

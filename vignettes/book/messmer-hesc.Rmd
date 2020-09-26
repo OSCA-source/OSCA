@@ -92,10 +92,14 @@ plot(sizeFactors(sce.mess), spike.sf, log = "xy", pch=16,
 
 ## Cell cycle phase assignment
 
+Here, we use multiple cores to speed up the processing.
+
 ```{r cell-cycle}
 set.seed(10001)
 hs_pairs <- readRDS(system.file("exdata", "human_cycle_markers.rds", package="scran"))
-assigned <- cyclone(sce.mess, pairs=hs_pairs, gene.names=rownames(sce.mess))
+assigned <- cyclone(sce.mess, pairs=hs_pairs, 
+    gene.names=rownames(sce.mess),
+    BPPARAM=BiocParallel::MulticoreParam(10))
 sce.mess$phase <- assigned$phases
 ```
 
@@ -130,16 +134,16 @@ for (i in seq_along(dec$per.block)) {
 
 ## Batch correction 
 
-We eliminate the obvious batch effect between batches with linear regression, 
-which is possible due to the replicated nature of the experimental design.
+We eliminate the obvious batch effect between batches with linear regression, which is possible due to the replicated nature of the experimental design.
+We set `keep=1:2` to retain the effect of the first two coefficients in `design` corresponding to our phenotype of interest.
 
 ```{r batch-correction}
-# TODO: modify regressBatches to preserve some of the covariates.
-library(limma)
-assay(sce.mess, "corrected") <- removeBatchEffect(
-  logcounts(sce.mess),
-  design = model.matrix(~sce.mess$phenotype),
-  batch = sce.mess$`experiment batch`
+library(batchelor)
+sce.mess <- correctExperiments(sce.mess, 
+    PARAM = RegressParam(
+        design = model.matrix(~sce.mess$phenotype + sce.mess$`experiment batch`),
+        keep = 1:2 
+    )
 )
 ```
 
@@ -174,6 +178,10 @@ background <- sce.mess[,is.bg]
 
 mat.target <- t(assay(target, "corrected")[top.hvgs,])
 mat.background <- t(assay(background, "corrected")[top.hvgs,])
+
+# TODO: get Phillipe to fix this so we can pass DelayedMatrices in directly.
+mat.target <- as.matrix(mat.target)
+mat.background <- as.matrix(mat.background)
 
 set.seed(1010101001)
 con_out <- scPCA(
