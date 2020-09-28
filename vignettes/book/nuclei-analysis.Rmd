@@ -132,7 +132,7 @@ Other analyses described for scRNA-seq require more care when they are applied t
 Most obviously, cell type annotation based on reference profiles (Section \@ref(cell-type-annotation)) should be treated with some caution as the majority of existing references are constructed from bulk or single-cell datasets with cytoplasmic transcripts.
 Interpretation of RNA velocity results may also be complicated by variation in the rate of nuclear export of spliced transcripts.
 
-## Tricks with ambient contamination 
+## Tricks with ambient contamination {#nuclei-ambient-tricks}
 
 The expected absence of genuine mitochondrial expression can also be exploited to estimate the level of ambient contamination (Section \@ref(ambient-problems)).
 We demonstrate on mouse brain snRNA-seq data from 10X Genomics [@zheng2017massively], using the raw count matrix prior to any filtering for nuclei-containing barcodes.

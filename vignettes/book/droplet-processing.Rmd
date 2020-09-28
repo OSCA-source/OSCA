@@ -105,11 +105,6 @@ Discerning readers will notice the use of `which()`, which conveniently removes 
 sce.pbmc <- sce.pbmc[,which(e.out$FDR <= 0.001)]
 ```
 
-It is worth pointing out that, at this point, we do not attempt to remove the ambient contamination from each library.
-Accurate quantification of the contamination rate in each cell is difficult as it generally requires some prior biological knowledge about genes that are expected to have mutually exclusive expression profiles _and_ are highly abundant in the ambient solution [@young2018soupx].
-Fortunately, ambient contamination usually has little effect on the downstream conclusions for routine analyses; cell type identities are usually easy enough to determine from the affected genes, notwithstanding a (mostly harmless) low background level of expression for marker genes that should be unique to a cell type.
-However, more susceptible analyses may require specific remedies like those discussed in Section \@ref(ambient-problems).
-
 ### Relationship with other QC metrics
 
 While `emptyDrops()` will distinguish cells from empty droplets, it makes no statement about the quality of the cells.
@@ -138,6 +133,97 @@ Note that _CellRanger_ version 3 automatically performs cell calling using an al
 If we had started our analysis with the **filtered** count matrix, we could go straight to computing other QC metrics.
 We would not need to run `emptyDrops()` manually as shown here, and indeed, attempting to do so would lead to nonsensical results if not outright software errors.
 Nonetheless, it may still be desirable to load the **unfiltered** matrix and apply `emptyDrops()` ourselves, on occasions where more detailed inspection or control of the cell-calling statistics is desired.
+
+## Removing ambient contamination
+
+For routine analyses, there is usually no need to remove the ambient contamination from each library.
+A consistent level of contamination across the dataset does not introduce much spurious heterogeneity, so dimensionality reduction and clustering on the original (log-)expression matrix remain valid.
+For genes that are highly abundant in the ambient solution, we can expect some loss of signal due to shrinkage of the log-fold changes between clusters towards zero, but this effect should be negligible for any genes that are so strongly upregulated that they are able to contribute to the ambient solution in the first place.
+So ambient removal can generally be omitted, though we will describe it here regardless as it can be useful in specific situations.
+
+Ambient removal is difficult as we need to know how much contamination is present in each cell.
+This usually requires some prior biological knowledge about genes that should not be expressed in the dataset (e.g., mitochondrial genes in single-nuclei datasets, see Section \@ref(nuclei-ambient-tricks)) or genes with mutually exclusive expression profiles [@young2018soupx], where those same genes must also be highly abundant in the ambient solution.
+The actual removal of the ambient contribution also must be done in a manner that respects the mean-variance relationship of the count data.
+Thus, rather than attempting to remove contamination from individual cells, a more sensible approach is to remove it from the cluster-level profiles and the propagate those changes to their constituent cells.
+
+We demonstrate this process using the `removeAmbience()` function on our PBMC dataset.
+This function aggregates counts in each cluster to obtain an average profile, estimates the contamination proportion in each cluster with `maximumAmbience()` (Section \@ref(ambient-problems)), subtracts the contamination from the cluster-level average, and then performs quantile-quantile mapping of each individual cell's counts from the old average to the new subtracted average.
+This has the useful property of not requiring any prior knowledge of control or mutually exclusive expression profiles, and it provides a statistically justifiable method for subtraction that preserves the mean-variance relationship.
+(That said, if feature information is available, we can specify it in the `features=` argument to obtain results more similar to those from the `r CRANpkg("SoupX")` package.)
+
+```{r, results='asis', echo=FALSE}
+extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("e.out"))
+extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("sce.pbmc"))
+```
+
+```{r}
+# Not all genes are reported in the ambient profile from emptyDrops,
+# as genes with counts of zero across all droplets are just removed.
+# So for convenience, we will restrict our analysis to genes with 
+# non-zero counts in at least one droplet (empty or otherwise).
+amb <- metadata(e.out)$ambient[,1]
+stripped <- sce.pbmc[names(amb),]
+
+out <- removeAmbience(counts(stripped), ambient=amb, groups=colLabels(stripped))
+dim(out)
+```
+
+We can visualize the effects of ambient removal on a gene like _IGKC_, which presumably should only be expressed in the B cell lineage.
+This gene has some level of expression in each cluster in the original dataset but is "zeroed" in most clusters after removal (Figure \@ref(fig:ambient-removal-igkc)).
+
+```{r ambient-removal-igkc, fig.width=9, fig.height=6, fig.cap="Distribution of _IGKC_ log-expression values in each cluster of the PBMC dataset, before and after removal of ambient contamination."}
+library(scater)
+counts(stripped, withDimnames=FALSE) <- out
+stripped <- logNormCounts(stripped)
+
+gridExtra::grid.arrange(
+    plotExpression(sce.pbmc, x="label", colour_by="label", features="IGKC") + 
+        ggtitle("Before"),
+    plotExpression(stripped, x="label", colour_by="label", features="IGKC") + 
+        ggtitle("After"),
+    ncol=2
+)
+```
+
+```{r, echo=FALSE}
+# Sanity checks.
+by.mean <- lapply(split(logcounts(sce.pbmc)["IGKC",], colLabels(sce.pbmc)), mean)
+stripped.mean <- lapply(split(logcounts(stripped)["IGKC",], colLabels(sce.pbmc)), mean)
+stopifnot(median(unlist(by.mean)) > 0)
+stopifnot(median(unlist(stripped.mean)) == 0)
+stopifnot(max(unlist(stripped.mean)) > 0.95 * max(unlist(by.mean))) # preserves top-expressors.
+```
+
+We observe a similar phenomenon with the _LYZ_ gene (Figure \@ref(fig:ambient-removal-lyz)), which should only be expressed in macrophages and neutrophils.
+
+```{r ambient-removal-lyz, fig.width=9, fig.height=6, fig.cap="Distribution of _LYZ_ log-expression values in each cluster of the PBMC dataset, before and after removal of ambient contamination."}
+gridExtra::grid.arrange(
+    plotExpression(sce.pbmc, x="label", colour_by="label", features="LYZ") + 
+        ggtitle("Before"),
+    plotExpression(stripped, x="label", colour_by="label", features="LYZ") + 
+        ggtitle("After"),
+    ncol=2
+)
+```
+
+```{r, echo=FALSE}
+# Sanity checks, again.
+by.mean <- lapply(split(logcounts(sce.pbmc)["LYZ",], colLabels(sce.pbmc)), mean)
+stripped.mean <- lapply(split(logcounts(stripped)["LYZ",], colLabels(sce.pbmc)), mean)
+stopifnot(median(unlist(by.mean)) > 0)
+stopifnot(median(unlist(stripped.mean)) == 0)
+stopifnot(max(unlist(stripped.mean)) > 0.95 * max(unlist(by.mean))) # preserves top-expressors.
+```
+
+While these results look impressive, discerning readers will note that the method relies on having sensible clusters.
+This limits the function's applicability to the _end_ of an analysis after all the characterization has already been done.
+As such, the stripped matrix can really only be used in downstream steps like the DE analysis (where it is unlikely to have much effect beyond inflating already-large log-fold changes) or - most importantly - in visualization, where users can improve the aesthetics of their plots by eliminating harmless background expression. 
+Of course, one could repeat the entire analysis on the stripped count matrix to obtain new clusters, but this seems unnecessarily circuituous, especially if the clusters were deemed good enough for use in `removeAmbience()` in the first place.
+
+Finally, it may be worth considering whether a corrected per-cell count matrix is really necessary.
+In `removeAmbience()`, counts for each gene are assumed to follow a negative binomial distribution with a fixed dispersion.
+This is necessary to perform the quantile-quantile remapping to obtain a corrected version of each individual cell's counts, but violations of these distributional assumptions will introduce inaccuracies in downstream models.
+Some analyses may have specific remedies to ambient contamination that do not require corrected per-cell counts (Section \@ref(ambient-problems)), so we can avoid these assumptions altogether if such remedies are available.
 
 ## Demultiplexing cell hashes {#cell-hashing}
 
