@@ -105,6 +105,10 @@ Discerning readers will notice the use of `which()`, which conveniently removes 
 sce.pbmc <- sce.pbmc[,which(e.out$FDR <= 0.001)]
 ```
 
+It usually only makes sense to call cells using a count matrix involving libraries from a single sample.
+The composition of transcripts in the ambient solution will usually between samples, so the same ambient profile cannot be reused.
+If multiple samples are present in a dataset, their counts should only be combined after cell calling is performed on each matrix.
+
 ### Relationship with other QC metrics
 
 While `emptyDrops()` will distinguish cells from empty droplets, it makes no statement about the quality of the cells.
@@ -139,20 +143,34 @@ Nonetheless, it may still be desirable to load the **unfiltered** matrix and app
 For routine analyses, there is usually no need to remove the ambient contamination from each library.
 A consistent level of contamination across the dataset does not introduce much spurious heterogeneity, so dimensionality reduction and clustering on the original (log-)expression matrix remain valid.
 For genes that are highly abundant in the ambient solution, we can expect some loss of signal due to shrinkage of the log-fold changes between clusters towards zero, but this effect should be negligible for any genes that are so strongly upregulated that they are able to contribute to the ambient solution in the first place.
-So ambient removal can generally be omitted, though we will describe it here regardless as it can be useful in specific situations.
+This suggests that ambient removal can generally be omitted from most analyses, though we will describe it here regardless as it can be useful in specific situations.
 
-Ambient removal is difficult as we need to know how much contamination is present in each cell.
-This usually requires some prior biological knowledge about genes that should not be expressed in the dataset (e.g., mitochondrial genes in single-nuclei datasets, see Section \@ref(nuclei-ambient-tricks)) or genes with mutually exclusive expression profiles [@young2018soupx], where those same genes must also be highly abundant in the ambient solution.
-The actual removal of the ambient contribution also must be done in a manner that respects the mean-variance relationship of the count data.
-Thus, rather than attempting to remove contamination from individual cells, a more sensible approach is to remove it from the cluster-level profiles and the propagate those changes to their constituent cells.
+Effective removal of ambient contamination involves tackling a number of issues.
+We need to know how much contamination is present in each cell, which usually requires some prior biological knowledge about genes that should not be expressed in the dataset (e.g., mitochondrial genes in single-nuclei datasets, see Section \@ref(nuclei-ambient-tricks)) or genes with mutually exclusive expression profiles [@young2018soupx].
+Those same genes must be highly abundant in the ambient solution to have enough counts in each cell for precise estimation of the scale of the contamination.
+The actual subtraction of the ambient contribution also must be done in a manner that respects the mean-variance relationship of the count data.
+Unfortunately, these issues are difficult to address for single-cell data due to the imprecision of low counts,
 
-We demonstrate this process using the `removeAmbience()` function on our PBMC dataset.
-This function aggregates counts in each cluster to obtain an average profile, estimates the contamination proportion in each cluster with `maximumAmbience()` (Section \@ref(ambient-problems)), subtracts the contamination from the cluster-level average, and then performs quantile-quantile mapping of each individual cell's counts from the old average to the new subtracted average.
-This has the useful property of not requiring any prior knowledge of control or mutually exclusive expression profiles, and it provides a statistically justifiable method for subtraction that preserves the mean-variance relationship.
-(That said, if feature information is available, we can specify it in the `features=` argument to obtain results more similar to those from the `r CRANpkg("SoupX")` package.)
+Rather than attempting to remove contamination from individual cells, a more measured approach is to operate on clusters of related cells.
+The `removeAmbience()` function from `r Biocpkg("DropletUtils")` will remove the contamination from the cluster-level profiles and propagate the effect of those changes back to the individual cells.
+Specifically, given a count matrix for a single sample and its associated ambient profile, `removeAmbience()` will:
+
+1. Aggregate counts in each cluster to obtain an average profile per cluster.
+2. Estimate the contamination proportion in each cluster with `maximumAmbience()` (see Section \@ref(ambient-problems)).
+This has the useful property of not requiring any prior knowledge of control or mutually exclusive expression profiles, albeit at the cost of some statistical rigor.
+3. Subtract the estimated contamination from the cluster-level average.
+4. Perform quantile-quantile mapping of each individual cell's counts from the old average to the new subtracted average.
+This preserves the mean-variance relationship while yielding corrected single-cell profiles.
+
+We demonstrate this process on our PBMC dataset below.
+
+```{r, results="hide", echo=FALSE}
+# load_cache vomits its crap into the global environment,
+# so we need to figure out how to hide it...
+extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("e.out"))
+```
 
 ```{r, results='asis', echo=FALSE}
-extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("e.out"))
 extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("sce.pbmc"))
 ```
 
@@ -195,6 +213,8 @@ stopifnot(max(unlist(stripped.mean)) > 0.95 * max(unlist(by.mean))) # preserves 
 ```
 
 We observe a similar phenomenon with the _LYZ_ gene (Figure \@ref(fig:ambient-removal-lyz)), which should only be expressed in macrophages and neutrophils.
+In fact, if we knew this beforehand, we could specify these two mutually exclusive sets - i.e., _LYZ_ and _IGKC_ and their related genes - in the `features=` argument to `removeAmbience()`.
+This knowledge is subsequently used to estimate the contamination in each cluster, an approach that is more conceptually similar to the methods in the `r CRANpkg("SoupX")` package.
 
 ```{r ambient-removal-lyz, fig.width=9, fig.height=6, fig.cap="Distribution of _LYZ_ log-expression values in each cluster of the PBMC dataset, before and after removal of ambient contamination."}
 gridExtra::grid.arrange(

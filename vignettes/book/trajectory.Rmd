@@ -808,7 +808,7 @@ This requires more planning and resources (i.e., cost!) and is frequently absent
 Generation of multiple timepoints also requires an amenable experimental system where the initiation of the process of interest can be tightly controlled.
 This is often more complex to set up than a strictly observational study, though having causal information arguably makes the data more useful for making inferences.
 
-## Session information {-}
+## Session Info {-}
 
 ```{r sessionInfo, echo=FALSE, results='asis'}
 prettySessionInfo()

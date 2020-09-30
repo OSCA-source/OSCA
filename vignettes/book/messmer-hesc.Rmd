@@ -250,7 +250,7 @@ stopifnot(all(original > c(naive=mean(cN$width), primed=mean(cP$width))))
 stopifnot(all(original > c(naive=mean(scN$width), primed=mean(scP$width))))
 ```
 
-## Session information
+## Session Info {-}
 
 ```{r, echo=FALSE, results='asis'}
 prettySessionInfo()
