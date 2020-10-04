@@ -1,6 +1,6 @@
 ---
-title: Source code for OrchestratingSingleCellAnalysis
-package: OrchestratingSingleCellAnalysis
+title: Source code for OSCA
+package: OSCA
 date: "`r Sys.Date()`"
 vignette: >
   %\VignetteIndexEntry{Source code}

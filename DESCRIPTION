@@ -1,6 +1,6 @@
-Package: OrchestratingSingleCellAnalysis
+Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 0.99.16
+Version: 0.99.17
 Date: 2020-10-04
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 
@@ -71,7 +71,7 @@ Imports: AnnotationHub,
     TSCAN,
     uwot,
     viridis
-biocViews: Workflow
+biocViews: ImmunoOncologyWorkflow,  Workflow,  SingleCellWorkflow
 Workflow: True
 VignetteBuilder: knitr
 Depends: R (>= 4.0)
