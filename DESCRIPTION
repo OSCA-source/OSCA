@@ -1,6 +1,6 @@
 Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 0.99.18
+Version: 0.99.19
 Date: 2020-10-04
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 
@@ -12,10 +12,10 @@ Description:
     Online book for orchestrating single cell analysis with Bioconductor. 
     Contains plenty of worked examples, theoretical background and some 
     philosophical discussions on the nature of single-cell data analysis.
-License: GPL-3
+License: CC BY
 Encoding: UTF-8
-LazyData: true
-Imports: AnnotationHub,
+URL: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis
+Suggests: AnnotationHub,
     AUCell,
     basilisk,
     batchelor,
@@ -74,4 +74,3 @@ Imports: AnnotationHub,
 biocViews: ImmunoOncologyWorkflow,  Workflow,  SingleCellWorkflow
 Workflow: True
 VignetteBuilder: knitr
-Depends: R (>= 4.0)

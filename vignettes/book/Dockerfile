@@ -3,11 +3,11 @@ FROM bioconductor/bioconductor_docker:devel
 RUN mkdir /home/book
 COPY . /home/book
 
-RUN R --quiet -e "options(warn=2); BiocManager::install(union(remotes::local_package_deps('/home/book'), 'bookdown'))"
+RUN R --quiet -e "options(warn=2); BiocManager::install(union(remotes::local_package_deps('/home/book', dependencies=TRUE), 'bookdown'))"
 
 LABEL name="bioconductor/bioconductor_docker_orchestratingsinglecellanalysis" \
       version="1.0.0" \
-      url="https://github.com/Bioconductor/bioconductor_docker_orchestratingsinglecellanalysis" \
+      url="https://github.com/Bioconductor/OrchestratingSingleCellAnalysis" \
       maintainer="infinite.monkeys.with.keyboards@gmail.com" \
       description="Build environment and contents of the OSCA book" \
       license="Artistic-2.0"
