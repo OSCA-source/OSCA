@@ -1,0 +1,16 @@
+---
+title: Source code for OrchestratingSingleCellAnalysis
+package: OrchestratingSingleCellAnalysis
+date: "`r Sys.Date()`"
+vignette: >
+  %\VignetteIndexEntry{Source code}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}    
+output: 
+  BiocStyle::html_document:
+    titlecaps: false
+    toc: false
+---
+
+Source code for this book can be found at https://github.com/Bioconductor/OrchestratingSingleCellAnalysis.
+

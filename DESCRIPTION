@@ -1,77 +1,77 @@
-Package: OSCA 
-Title: Compilation Wrapper for the OSCA Book
-Version: 0.99.15
-Date: 2020-09-30
-Authors@R: person(role=c("aut", "cre"), "Aaron", "Lun", email = "infinite.monkeys.with.keyboards@gmail.com")
+Package: OrchestratingSingleCellAnalysis
+Title: Orchestrating Single Cell Analysis with Bioconductor
+Version: 0.99.16
+Date: 2020-10-04
+Authors@R: c( 
+        person('Robert', 'Amezquita', role = c('aut')), 
+        person('Aaron', 'Lun', role = c('aut', 'cre'), email="infinite.monkeys.with.keyboards@gmail.com"), 
+        person('Stephanie', 'Hicks', role = 'aut'), 
+        person('Raphael', 'Gottardo', role = 'aut') 
+    )
 Description: 
-    Serves as a vehicle to compile the "Orchestrating Single-Cell Analyses with
-    Bioconductor" book (https://osca.bioconductor.org) on the Bioconductor
-    build machines. Book chapters are transplanted into the vignettes
-    subdirectory where the build system can be deceived into compiling them.
-    The compiled book is then available in the tarball for deployment on the
-    site of your choice.
+    Online book for orchestrating single cell analysis with Bioconductor. 
+    Contains plenty of worked examples, theoretical background and some 
+    philosophical discussions on the nature of single-cell data analysis.
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
-VignetteBuilder: knitr
-biocViews: ImmunoOncologyWorkflow, Workflow, SingleCellWorkflow
-Workflow: True
-NeedsCompilation: no
-URL: https://github.com/LTLA/OrchestratingSingleCellAnalysisWrapper
-RoxygenNote: 7.1.0
 Imports: AnnotationHub,
-  AUCell,
-  basilisk,
-  batchelor,
-  BiocFileCache,
-  BiocNeighbors,
-  BiocParallel,
-  BiocSingular,
-  BiocStyle,
-  bluster,
-  celldex,
-  cluster,
-  clustree,
-  corral,
-  DelayedMatrixStats,
-  dendextend,
-  DropletTestFiles,
-  DropletUtils,
-  dynamicTreeCut,
-  edgeR,
-  EnsDb.Hsapiens.v86,
-  ggbeeswarm,
-  GO.db,
-  gridExtra,
-  GSEABase,
-  HCAData,
-  igraph,
-  iSEE,
-  knitr,
-  limma,
-  MouseGastrulationData,
-  msigdbr,
-  org.Hs.eg.db,
-  org.Mm.eg.db,
-  PCAtools,
-  pheatmap,
-  rebook,
-  RMTstat,
-  robustbase,
-  Rtsne,
-  scater,
-  scDblFinder,
-  scPCA,
-  scran,
-  scRNAseq,
-  scuttle,
-  SingleCellExperiment,
-  SingleR,
-  slingshot,
-  statmod,
-  TENxBrainData,
-  TENxPBMCData,
-  tradeSeq,
-  TSCAN,
-  uwot,
-  viridis
+    AUCell,
+    basilisk,
+    batchelor,
+    BiocFileCache,
+    BiocNeighbors,
+    BiocParallel,
+    BiocSingular,
+    BiocStyle,
+    bluster,
+    celldex,
+    cluster,
+    clustree,
+    corral,
+    DelayedMatrixStats,
+    dendextend,
+    DropletTestFiles,
+    DropletUtils,
+    dynamicTreeCut,
+    edgeR,
+    EnsDb.Hsapiens.v86,
+    ggbeeswarm,
+    GO.db,
+    gridExtra,
+    GSEABase,
+    HCAData,
+    igraph,
+    iSEE,
+    knitr,
+    limma,
+    MouseGastrulationData,
+    msigdbr,
+    org.Hs.eg.db,
+    org.Mm.eg.db,
+    PCAtools,
+    pheatmap,
+    rebook,
+    RMTstat,
+    robustbase,
+    Rtsne,
+    scater,
+    scDblFinder,
+    scPCA,
+    scran,
+    scRNAseq,
+    scuttle,
+    SingleCellExperiment,
+    SingleR,
+    slingshot,
+    statmod,
+    TENxBrainData,
+    TENxPBMCData,
+    tradeSeq,
+    TSCAN,
+    uwot,
+    viridis
+biocViews: Workflow
+Workflow: True
+VignetteBuilder: knitr
+Depends: R (>= 4.0)
