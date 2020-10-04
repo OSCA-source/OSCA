@@ -1,6 +1,6 @@
 Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 0.99.17
+Version: 0.99.18
 Date: 2020-10-04
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 

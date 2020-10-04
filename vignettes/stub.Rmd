@@ -1,5 +1,5 @@
 ---
-title: Source code for OSCA
+title: Source code for OrchestratingSingleCellAnalysis
 package: OSCA
 date: "`r Sys.Date()`"
 vignette: >
