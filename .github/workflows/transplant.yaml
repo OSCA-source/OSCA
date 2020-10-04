@@ -23,6 +23,8 @@ jobs:
         with:
           book: Bioconductor/OrchestratingSingleCellAnalysis
           branch: ${{ matrix.branch }}
+          name: OSCA
+          biocViews: "ImmunoOncologyWorkflow, Workflow, SingleCellWorkflow"
       - name: Committing to master
         run: | 
           git config --local user.email "action@github.com"
