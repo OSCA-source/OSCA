@@ -225,8 +225,8 @@ To reduce computational work and technical noise, all cells in all batches are p
 Identification of MNNs and calculation of correction vectors are then performed in this low-dimensional space.
 
 ```{r}
-# Using randomized SVD here, as this is faster than 
-# irlba for file-backed matrices.
+# Again, using randomized SVD here, as this is faster than IRLBA for
+# file-backed matrices. We set deferred=TRUE for greater speed.
 set.seed(1000101001)
 mnn.out <- fastMNN(pbmc3k, pbmc4k, d=50, k=20, subset.row=chosen.hvgs,
     BSPARAM=BiocSingular::RandomParam(deferred=TRUE))
@@ -306,19 +306,23 @@ stats <- kBET(rbind(a, b), ID)
 stats$summary[,3] # all-zero p-values.
 ```
 
-We favor a more qualitative approach whereby we compute the variation in the log-abundances to rank the clusters with the greatest variability in their proportional abundances across clusters.
+We favor a more qualitative approach whereby we compute the variation in the log-abundances to rank the clusters with the greatest variability in their proportional abundances across batches.
 We can then focus on batch-specific clusters that may be indicative of incomplete batch correction.
-Obviously, though, such clusters are only potentially problematic as the same outcome can be caused by batch-specific populations;
+Obviously, though, this diagnostic is subject to interpretation as the same outcome can be caused by batch-specific populations;
 some prior knowledge about the biological context is necessary to distinguish between these two possibilities.
+For the PBMC dataset, none of the most variable clusters are overtly batch-specific, consistent with the fact that our batches are effectively replicates.
 
 ```{r}
+# Avoid minor difficulties with the 'table' class.
+tab.mnn <- unclass(tab.mnn)
+
 # Using a large pseudo.count to avoid unnecessarily
 # large variances when the counts are low.
 norm <- normalizeCounts(tab.mnn, pseudo.count=10)
 
 # Ranking clusters by the largest variances.
 rv <- rowVars(norm)
-DataFrame(Batch=unclass(tab.mnn), var=rv)[order(rv, decreasing=TRUE),]
+DataFrame(Batch=tab.mnn, var=rv)[order(rv, decreasing=TRUE),]
 ```
 
 We can also visualize the corrected coordinates using a $t$-SNE plot (Figure \@ref(fig:tsne-pbmc-corrected)).

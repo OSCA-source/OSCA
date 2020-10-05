@@ -164,14 +164,8 @@ This preserves the mean-variance relationship while yielding corrected single-ce
 
 We demonstrate this process on our PBMC dataset below.
 
-```{r, results="hide", echo=FALSE}
-# load_cache vomits its crap into the global environment,
-# so we need to figure out how to hide it...
-extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("e.out"))
-```
-
-```{r, results='asis', echo=FALSE}
-extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("sce.pbmc"))
+```{r, results="asis", echo=FALSE}
+extractCached("tenx-unfiltered-pbmc4k.Rmd", "clustering", c("e.out", "sce.pbmc"))
 ```
 
 ```{r}
