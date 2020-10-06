@@ -194,8 +194,8 @@ Alternatively, this entire process can be done in a single step using the `quick
 This is a wrapper that simply calls `isOutlier()` with the settings described above.
 
 ```{r}
-reasons <- quickPerCellQC(df, percent_subsets=c("subsets_Mito_percent",
-    "altexps_ERCC_percent"))
+reasons <- quickPerCellQC(df, 
+    sub.fields=c("subsets_Mito_percent", "altexps_ERCC_percent"))
 colSums(as.matrix(reasons))
 ```
 
@@ -236,9 +236,9 @@ We combine these factors together and use this in the `batch=` argument to `isOu
 This results in the removal of slightly more cells as the MAD is no longer inflated by (i) systematic differences in sequencing depth between batches and (ii) differences in number of genes expressed upon oncogene induction.
 
 ```{r}
-batch <- paste0(sce.416b$phenotype, "-", sce.416b$Plate)
-batch.reasons <- quickPerCellQC(df, percent_subsets=c("subsets_Mito_percent",
-    "altexps_ERCC_percent"), batch=batch)
+batch <- paste0(sce.416b$phenotype, "-", sce.416b$block)
+batch.reasons <- quickPerCellQC(df, batch=batch,
+    sub.fields=c("subsets_Mito_percent", "altexps_ERCC_percent"))
 colSums(as.matrix(batch.reasons))
 ```
 
@@ -368,7 +368,7 @@ sce.zeisel <- addPerCellQC(sce.zeisel,
     subsets=list(Mt=rowData(sce.zeisel)$featureType=="mito"))
 
 qc <- quickPerCellQC(colData(sce.zeisel), 
-    percent_subsets=c("altexps_ERCC_percent", "subsets_Mt_percent"))
+    sub.fields=c("altexps_ERCC_percent", "subsets_Mt_percent"))
 sce.zeisel$discard <- qc$discard
 
 plotColData(sce.zeisel, x="sum", y="subsets_Mt_percent", colour_by="discard")

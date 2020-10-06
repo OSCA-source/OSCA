@@ -6,7 +6,6 @@ language:
   ui:
     chapter_name: "Chapter "
 cover-image: "images/cover.png"
-repo: "Bioconductor/OrchestratingSingleCellAnalysis"
 output_dir: "docs"
 rmd_files: ["index.Rmd",
     # Part 1, intro:

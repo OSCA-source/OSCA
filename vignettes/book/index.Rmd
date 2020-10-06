@@ -1,19 +1,27 @@
 --- 
 title: "Orchestrating Single-Cell Analysis with Bioconductor"
-date: "`r Sys.Date()`"
-site: bookdown::bookdown_site
 documentclass: book
 bibliography: [ref.bib, packages.bib]
 biblio-style: apalike
 link-citations: yes
 favicon: "favicon.ico"
 description: "Or: how I learned to stop worrying and love the t-SNEs."
-cover-image: "https://www.bioconductor.org/images/logo_bioconductor.gif"
+cover-image: "https://github.com/Bioconductor/BiocStickers/raw/master/Bioconductor/Bioconductor-serial.gif"
+github-repo: Bioconductor/OrchestratingSingleCellAnalysis
+---
+
+```{r, echo=FALSE}
+.gh_url <- file.path('https://github.com', rmarkdown::metadata[['github-repo']])
+```
+
+---
+date: "`r rebook::openingDetails(Copyright='Bioconductor, 2020', Source=.gh_url)`"
+url: "`r .gh_url`"
 ---
 
 # Welcome {-}
 
-<a href="https://bioconductor.org"><img src="https://github.com/Bioconductor/BiocStickers/raw/master/Bioconductor/Bioconductor-serial.gif" width="200" alt="Bioconductor Sticker" align="right" style="margin: 0 1em 0 1em" /></a> 
+<a href="https://bioconductor.org"><img src="`r rmarkdown::metadata[["cover-image"]]`" width="200" alt="Bioconductor Sticker" align="right" style="margin: 0 1em 0 1em" /></a> 
 
 This is the website for __"Orchestrating Single-Cell Analysis with Bioconductor"__, a book that teaches users some common workflows for the analysis of single-cell RNA-seq data (scRNA-seq). This book will teach you how to make use of cutting-edge Bioconductor tools to process, analyze, visualize, and explore scRNA-seq data. Additionally, it serves as an online companion for the manuscript __"Orchestrating Single-Cell Analysis with Bioconductor"__. 
 
@@ -42,6 +50,3 @@ knitr::write_bib(c(
   .packages(), 'bookdown', 'knitr', 'rmarkdown'
 ), 'packages.bib')
 ```
-
-_Version 0.0.1.9999_
-_Built on `r Sys.Date()`_
