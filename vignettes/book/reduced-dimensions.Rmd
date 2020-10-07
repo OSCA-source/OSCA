@@ -30,7 +30,7 @@ We will use the @zeisel2015brain dataset to demonstrate the applications of vari
 
 ```{r, echo=FALSE, results="asis"}
 extractCached("zeisel-brain.Rmd", "variance-modelling", 
-    c("sce.zeisel", "dec.zeisel"))
+    c("sce.zeisel", "dec.zeisel", "top.hvgs"))
 ```
 
 ```{r}
