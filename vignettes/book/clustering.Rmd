@@ -146,7 +146,7 @@ The graph itself can be visualized using a force-directed layout (Figure \@ref(f
 This yields a dimensionality reduction result that is closely related to $t$-SNE and UMAP, though which of these is the most aesthetically pleasing is left to the eye of the beholder.
 
 ```{r pbmc-force, message=FALSE, fig.cap="Force-directed layout for the shared nearest-neighbor graph of the PBMC dataset. Each point represents a cell and is coloured according to its assigned cluster identity."}
-set.seed(2000)
+set.seed(11000)
 reducedDim(sce.pbmc, "force") <- igraph::layout_with_fr(g)
 plotReducedDim(sce.pbmc, colour_by="label", dimred="force")
 ```
@@ -524,6 +524,7 @@ plotReducedDim(sce.416b, "TSNE", colour_by="label")
 ```
 
 ```{r, echo=FALSE}
+set.seed(910191)
 fault <- 2L
 visual <- kmeans(reducedDim(sce.416b, "TSNE"), 4)
 xtab <- table(colLabels(sce.416b), visual$cluster)
