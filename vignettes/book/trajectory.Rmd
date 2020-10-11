@@ -609,24 +609,17 @@ lowest <- c("5", "8")
 low.text <- paste(paste(head(lowest, -1), collapse=", "), "and", tail(lowest, 1))
 ```
 
-We quantify the diversity of expression by computing the entropy of the expression profile within each cell [@grun2016denovo;@guo2017slice;@teschendorff2017singlecell], with higher entropy corresponding to greater diversity and thus reduced differentiation.
-To demonstrate, we examine the entropies for each cluster in the Nestorowa HSC dataset (Figure \@ref(fig:entropy-nest)).
-We observe that clusters `r low.text` have the highest entropies, 
-which suggests that they represent the least differentiated state within the trajectory.
-It is also reassuring that these two clusters are adjacent on the MST (Figure \@ref(fig:tscan-nest-tsne)),
-which is consistent with branched differentiation "away" from a single root.
+We quantify the diversity of expression by computing the entropy of each cell's expression profile [@grun2016denovo;@guo2017slice;@teschendorff2017singlecell], with higher entropies representing greater diversity.
+We demonstrate on the Nestorowa HSC dataset (Figure \@ref(fig:entropy-nest)) where clusters `r low.text` have the highest entropies, suggesting that they represent the least differentiated states within the trajectory.
+It is also reassuring that these two clusters are adjacent on the MST (Figure \@ref(fig:tscan-nest-tsne)), which is consistent with branched differentiation "away" from a single root.
 
 ```{r entropy-nest, fig.cap="Distribution of per-cell entropies for each cluster in the Nestorowa dataset. The median entropy for each cluster is shown as a point in the violin plot."}
-# TODO: shovel this into a function somewhere.
-library(scuttle)
-nzero <- whichNonZero(counts(sce.nest)) 
-p <- nzero$x / colSums(counts(sce.nest))[nzero$j]
-entropy <- - p * log(p)
-entropy <- by(entropy, INDICES=nzero$j, FUN=sum)
-
-ent.data <- data.frame(cluster=colLabels(sce.nest), 
-    entropy=as.vector(entropy))
-ggplot(ent.data, aes(x=cluster, y=entropy)) + geom_violin() +
+library(TSCAN)
+entropy <- perCellEntropy(sce.nest)
+ent.data <- data.frame(cluster=colLabels(sce.nest), entropy=entropy)
+ggplot(ent.data, aes(x=cluster, y=entropy)) + 
+    geom_violin() +
+    coord_cartesian(ylim=c(7, NA)) +
     stat_summary(fun=median, geom="point")
 ```
 
