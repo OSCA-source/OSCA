@@ -1,7 +1,7 @@
 Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 0.99.24
-Date: 2020-10-11
+Version: 0.99.25
+Date: 2020-10-13
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 
         person('Aaron', 'Lun', role = c('aut', 'cre'), email="infinite.monkeys.with.keyboards@gmail.com"), 
@@ -17,7 +17,6 @@ Encoding: UTF-8
 URL: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis
 Suggests: AnnotationHub,
     AUCell,
-    basilisk,
     batchelor,
     BiocFileCache,
     BiocNeighbors,
@@ -37,6 +36,7 @@ Suggests: AnnotationHub,
     edgeR,
     EnsDb.Hsapiens.v86,
     ggbeeswarm,
+    ggplot2,
     GO.db,
     gridExtra,
     GSEABase,
@@ -71,6 +71,7 @@ Suggests: AnnotationHub,
     tradeSeq,
     TSCAN,
     uwot,
+    velociraptor,
     viridis
 biocViews: ImmunoOncologyWorkflow,  Workflow,  SingleCellWorkflow
 Workflow: True
