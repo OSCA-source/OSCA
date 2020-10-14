@@ -672,7 +672,7 @@ Conveniently, both matrices have the same shape and thus can be stored as separa
 
 ```{r}
 library(scRNAseq)
-sce.sperm <- HermannSpermatogenesisData(strip=TRUE)
+sce.sperm <- HermannSpermatogenesisData(strip=TRUE, location=TRUE)
 assayNames(sce.sperm)
 ```
 
