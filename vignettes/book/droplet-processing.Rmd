@@ -324,13 +324,12 @@ If so, we can skip this section entirely and proceed straight to demultiplexing.
 ### Demultiplexing on HTO abundance
 
 We run `hashedDrops()` to demultiplex the HTO count matrix for the subset of cell-containing libraries. 
-This returns the likely sample of origin for each library based on its most abundant HTO after adjusting those abundances for ambient contamination.
+This reports the likely sample of origin for each library based on its most abundant HTO after adjusting those abundances for ambient contamination.
 For quality control, it returns the log-fold change between the first and second-most abundant HTOs in each barcode libary (Figure \@ref(fig:hto-1to2-hist)), allowing us to quantify the certainty of each assignment.
 
 ```{r hto-1to2-hist, fig.cap="Distribution of log-fold changes from the first to second-most abundant HTO in each cell."}
 hto.mat <- counts(altExp(hto.sce))[,which(is.cell)]
-hash.stats <- hashedDrops(hto.mat, ambient=metadata(e.out.hto)$ambient)
-
+hash.stats <- hashedDrops(hto.mat)
 hist(hash.stats$LogFC, xlab="Log fold-change from best to second HTO", main="")
 ```
 
@@ -346,28 +345,45 @@ table(hash.stats$Best)
 table(hash.stats$Best[hash.stats$Confident])
 ```
 
-The ambient adjustment is necessary to account for systematic differences in HTO concentrations that could otherwise skew the log-fold changes.
-For example, we observe an order-of-magnitude difference in the background levels of different HTOs in the cell line mixture data (Figure \@ref(fig:hto-ambient)).
+In the absence of an _a priori_ ambient profile, `hashedDrops()` will attempt to automatically estimate it from the count matrix.
+This is done by assuming that each HTO has a bimodal distribution where the lower peak corresponds to ambient contamination in cells that do not belong to that HTO's sample.
+Counts are then averaged across all cells in the lower mode to obtain the relative abundance of that HTO (Figure \@ref(fig:hto-ambient)).
+`hashedDrops()` uses the ambient profile to adjust for systematic differences in HTO concentrations that could otherwise skew the log-fold changes - 
+for example, this particular dataset exhibits order-of-magnitude differences in the concentration of different HTOs. 
 The adjustment process itself involves a fair number of assumptions that we will not discuss here; see `?hashedDrops` for more details.
 
-```{r hto-ambient, fig.cap="Proportion of each HTO in the ambient solution for the cell line mixture data, estimated from the low-count droplets in `emptyDrops()`."}
-barplot(metadata(e.out.hto)$ambient[,1], las=2,
-    ylab="Proportion of counts in the ambient solution")
+```{r hto-ambient, fig.cap="Proportion of each HTO in the ambient solution for the cell line mixture data, estimated from the HTO counts of cell-containing droplets."}
+barplot(metadata(hash.stats)$ambient, las=2,
+    ylab="Inferred proportion of counts in the ambient solution")
 ```
 
 ```{r, echo=FALSE}
-stopifnot(max(metadata(e.out.hto)$ambient) > min(metadata(e.out.hto)$ambient)*10)
+stopifnot(max(metadata(hash.stats)$ambient) > min(metadata(hash.stats)$ambient)*10)
 ```
 
-In the absence of an estimate of the ambient profile, `hashedDrops()` will attempt to estimate it from the count matrix.
-This is done by assuming that each HTO has a bimodal distribution where the lower peak corresponds to ambient contamination in cells that do not belong to that HTO's sample.
-Thus, by taking the average across all cells in the lower mode for each each HTO, we can obtain an estimate of the ambient profile that is often close to that from `emptyDrops()` or `estimateAmbience()` (Figure \@ref(fig:hto-ambient2)).
+If we are dealing with unfiltered data, we have the opportunity to improve the inferences by defining the ambient profile beforehand based on the empty droplets.
+This simply involves summing the counts for each HTO across all _known empty_ droplets, marked as those libraries with `NA` FDR values in the `emptyDrops()` output.
+Alternatively, if we had called `emptyDrops()` directly on the HTO count matrix, we could just extract the ambient profile from the output's `metadata()`.
+For this dataset, all methods agree well (Figure \@ref(fig:hto-ambient)) though providing an _a priori_ profile can be helpful in more extreme situations where the automatic method fails,
+e.g., if there are too few cells in the lower mode for accurate estimation of a HTO's ambient concentration.
 
-```{r hto-ambient2, fig.cap="Proportion of each HTO in the ambient solution for the cell line mixture data, estimated from the HTO counts of cell-containing droplets."}
-hash.stats2 <- hashedDrops(hto.mat)
+```{r hto-ambient2, fig.cap="Proportion of each HTO in the ambient solution for the cell line mixture data, estimated using the bimodal method in `hashedDrops()` or by computing the average abundance across all empty droplets (where the empty state is defined by using `emptyDrops()` on either the genes or the HTO matrix)."}
+estimates <- rbind(
+    `Bimodal`=proportions(metadata(hash.stats)$ambient),
+    `Empty (genes)`=proportions(rowSums(counts(altExp(hto.sce))[,is.na(e.out.gene$FDR)])),
+    `Empty (HTO)`=metadata(e.out.hto)$ambient[,1]
+)
+
+barplot(estimates, beside=TRUE, ylab="Proportion of counts in the ambient solution")
+legend("topleft", fill=gray.colors(3), legend=rownames(estimates))
+```
+
+Given an estimate of the ambient profile - say, the one derived from empty droplets detected using the HTO count matrix - we can easily use it in `hashedDrops()` via the `ambient=` argument.
+This yields very similar results to those obtained with the automatic method, as expected from the similarity in the profiles.
+
+```{r}
+hash.stats2 <- hashedDrops(hto.mat, ambient=metadata(e.out.hto)$ambient[,1])
 table(hash.stats2$Best[hash.stats2$Confident])
-barplot(metadata(hash.stats2)$ambient, las=2,
-    ylab="Inferred proportion of counts in the ambient solution")
 ```
 
 ```{r, echo=FALSE}
