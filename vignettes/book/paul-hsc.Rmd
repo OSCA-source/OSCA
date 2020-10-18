@@ -31,12 +31,6 @@ After loading and annotation, we inspect the resulting `SingleCellExperiment` ob
 sce.paul
 ```
 
-After loading and annotation, we inspect the resulting `SingleCellExperiment` object:
-
-```{r}
-sce.paul
-```
-
 ## Quality control
 
 ```{r}
@@ -47,7 +41,7 @@ For some reason, only one mitochondrial transcripts are available, so we will pe
 Ideally, we would simply block on the plate of origin to account for differences in processing, but unfortunately, it seems that many plates have a large proportion (if not outright majority) of cells with poor values for both metrics.
 We identify such plates based on the presence of very low outlier thresholds, for some arbitrary definition of "low"; we then redefine thresholds using information from the other (presumably high-quality) plates.
 
-```{r quality-control-grun}
+```{r quality-control}
 library(scater)
 stats <- perCellQCMetrics(sce.paul) 
 qc <- quickPerCellQC(stats, batch=sce.paul$Plate_ID)
@@ -156,6 +150,11 @@ pheatmap::pheatmap(log10(tab+10), color=viridis::viridis(100))
 
 ```{r unref-paul-tsne, fig.cap="Obligatory $t$-SNE plot of the Paul HSC dataset, where each point represents a cell and is colored according to the assigned cluster."}
 plotTSNE(sce.paul, colour_by="label")
+```
+
+```{r unref-paul-tsne2, fig.width=8, fig.height=8, fig.cap="Obligatory $t$-SNE plot of the Paul HSC dataset faceted by the treatment condition, where each point represents a cell and is colored according to the assigned cluster."}
+plotTSNE(sce.paul, colour_by="label", other_fields="Batch_desc") + 
+    facet_wrap(~Batch_desc)
 ```
 
 ## Session Info {-}

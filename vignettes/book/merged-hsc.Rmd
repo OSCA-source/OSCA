@@ -1,0 +1,158 @@
+# Merged mouse HSC datasets {#merged-hsc}
+
+```{r unref-setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble(cache=TRUE)
+```
+
+## Introduction
+
+The blood is probably the most well-studied tissue in the single-cell field, mostly because everything is already dissociated "for free".
+Of particular interest has been the use of single-cell genomics to study cell fate decisions in haematopoeisis.
+Indeed, it was not long ago that dueling interpretations of haematopoeitic stem cell (HSC) datasets were a mainstay of single-cell conferences.
+Sadly, these times have mostly passed so we will instead entertain ourselves by combining a small number of these datasets into a single analysis.
+
+## Data loading
+
+```{r, results='asis', echo=FALSE}
+extractCached("nestorowa-hsc.Rmd", "variance-modelling", c("sce.nest", "dec.nest"))
+```
+
+```{r}
+sce.nest
+```
+
+The Grun dataset requires a little bit of subsetting and re-analysis to only consider the sorted HSCs.
+
+```{r, results='asis', echo=FALSE}
+extractCached("grun-hsc.Rmd", "quality-control", "sce.grun.hsc")
+```
+
+```{r}
+sce.grun.hsc <- sce.grun.hsc[,sce.grun.hsc$protocol=="sorted hematopoietic stem cells"]
+
+library(scuttle)
+sce.grun.hsc <- logNormCounts(sce.grun.hsc)
+
+library(scran)
+dec.grun.hsc <- modelGeneVarByPoisson(sce.grun.hsc) 
+```
+
+Finally, we will grab the Paul dataset, which we will also subset to only consider the unsorted myeloid population.
+This removes the various knockout conditions that just complicates matters.
+
+```{r, results='asis', echo=FALSE}
+extractCached("paul-hsc.Rmd", "quality-control", "sce.paul")
+```
+
+```{r}
+sce.paul <- sce.paul[,sce.paul$Batch_desc=="Unsorted myeloid"]
+sce.paul <- logNormCounts(sce.paul)
+dec.paul <- modelGeneVarByPoisson(sce.paul) 
+```
+
+## Setting up the merge
+
+```{r common-annotation}
+common <- Reduce(intersect, list(rownames(sce.nest),
+    rownames(sce.grun.hsc), rownames(sce.paul)))
+length(common)
+```
+
+Combining variances to obtain a single set of HVGs.
+
+```{r variance-modelling}
+combined.dec <- combineVar(
+    dec.nest[common,], 
+    dec.grun.hsc[common,], 
+    dec.paul[common,]
+)
+hvgs <- getTopHVGs(combined.dec, n=5000)
+```
+
+Adjusting for gross differences in sequencing depth.
+
+```{r normalization}
+library(batchelor)
+normed.sce <- multiBatchNorm(
+    Nestorowa=sce.nest[common,],
+    Grun=sce.grun.hsc[common,],
+    Paul=sce.paul[common,]
+)
+```
+
+## Merging the datasets
+
+We turn on `auto.merge=TRUE` to instruct `fastMNN()` to choose the sequential merges with the largest number of MNNs.
+
+```{r batch-correction}
+set.seed(1000010)
+merged <- fastMNN(normed.sce, subset.row=hvgs, auto.merge=TRUE)
+```
+
+Not too much variance lost inside each batch, hopefully.
+We also observe that the algorithm chose to merge the more diverse Nestorowa and Paul datasets before dealing with the Grun dataset.
+
+```{r}
+metadata(merged)$merge.info[,c("left", "right", "lost.var")]
+```
+
+```{r, echo=FALSE}
+# Sanity check that it does in fact do that.
+ref <- metadata(merged)$merge.info[1,c("left", "right")]
+stopifnot(all.equal(sort(unname(unlist(unlist(ref)))), c("Nestorowa", "Paul")))
+```
+
+## Combined analyses 
+
+The Grun dataset does not contribute to many clusters, consistent with a pure undifferentiated HSC population.
+Most of the other clusters contain contributions from the Nestorowa and Paul datasets, though some are unique to the Paul dataset.
+This may be due to incomplete correction though we tend to think that this are Paul-specific subpopulations,
+given that the Nestorowa dataset does not have similarly sized unique clusters that might represent their uncorrected counterparts.
+
+```{r clustering}
+library(bluster)
+colLabels(merged) <- clusterRows(reducedDim(merged), 
+    NNGraphParam(cluster.fun="louvain"))
+table(Cluster=colLabels(merged), Batch=merged$batch)
+```
+
+```{r, echo=FALSE}
+tab <- table(Cluster=colLabels(merged), Batch=merged$batch)
+stopifnot(median(tab[,"Grun"])==0)
+```
+
+While I prefer $t$-SNE plots, 
+we'll switch to a UMAP plot to highlight some of the trajectory-like structure across clusters (Figure \@ref(fig:unref-umap-merged-hsc)).
+
+```{r unref-umap-merged-hsc, fig.width=10, fig.height=5, fig.cap="Obligatory UMAP plot of the merged HSC datasets, where each point represents a cell and is colored by the batch of origin (left) or its assigned cluster (right)."}
+library(scater)
+set.seed(101010101)
+merged <- runUMAP(merged, dimred="corrected")
+gridExtra::grid.arrange(
+    plotUMAP(merged, colour_by="label"),
+    plotUMAP(merged, colour_by="batch"),
+    ncol=2
+)
+```
+
+In fact, we might as well compute a trajectory right now (Figure \@ref(fig:unref-umap-traj-hsc)).
+
+```{r trajectory}
+library(TSCAN)
+pseudo.out <- quickPseudotime(merged, use.dimred="corrected", outgroup=TRUE)
+```
+
+```{r unref-umap-traj-hsc, fig.cap="Another UMAP plot of the merged HSC datasets, where each point represents a cell and is colored by its _TSCAN_ pseudotime. The lines correspond to the edges of the MST across cluster centers."}
+common.pseudo <- rowMeans(pseudo.out$ordering, na.rm=TRUE)
+plotUMAP(merged, colour_by=I(common.pseudo), 
+        text_by="label", text_colour="red") +
+    geom_line(data=pseudo.out$connected$UMAP, 
+        mapping=aes(x=dim1, y=dim2, group=edge))
+```
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```
