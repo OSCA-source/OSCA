@@ -1,6 +1,6 @@
 # Segerstolpe human pancreas (Smart-seq2)
 
-```{r unref-setup, echo=FALSE, results="asis"}
+```{r unref-setup, cache=FALSE, echo=FALSE, results="asis"}
 library(rebook)
 chapterPreamble(cache=TRUE)
 ```
