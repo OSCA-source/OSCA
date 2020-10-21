@@ -42,9 +42,7 @@ sce <- read10xCounts(file.path(dir, "filtered_feature_bc_matrix"))
 sce
 ```
 
-## Preprocessing 
-
-### Setting up the data
+## Setting up the data
 
 The `SingleCellExperiment` class provides the concept of an "alternative Experiment" to store data for different sets of features but the same cells.
 This involves storing another `SummarizedExperiment` (or an instance of a subclass) _inside_ our `SingleCellExperiment` where the rows (features) can differ but the columns (cells) are the same.
@@ -66,144 +64,195 @@ counts(altExp(sce)) <- as.matrix(counts(altExp(sce)))
 counts(altExp(sce))[,1:10] # sneak peek
 ```
 
-### Quality control
+## Quality control
 
-For most part, our quality control for this dataset still depends on the endogenous transcripts to remove empty droplets and low-quality cells.
-Any failure in cDNA capture for a particular cell will affect the coverage of both transcripts and ADTs, and changes in mitochondrial RNA content are only reflected in the transcriptomic data; as a result, the ADTs provide little additional information for QC.
-For this dataset, the count matrix has already been filtered in _CellRanger_ to remove empty droplets so we only filter on the mitochondrial proportions to remove putative low-quality cells.
+As with the endogenous genes, we want to remove cells that have failed to capture/sequence the ADTs.
+Recall that droplet-based libraries will contain contamination from ambient solution (Section \@ref(qc-droplets)), in this case containing containing conjugated antibodies that are either free in solution or bound to cell fragments.
+As the ADTs are (relatively) deeply sequenced, we can expect non-zero counts for most ADTs in each cell due to contamination (Figure \@ref(fig:detected-ab-hist); if this is not the case, we might suspect some failure of ADT processing for that cell.
+We thus remove cells that have unusually low numbers of detected ADTs using the usual outlier-based approach.
+
+```{r detected-ab-hist, fig.cap="Distribution of the number of detected ADTs across all cells in the PBMC dataset. The red dotted line indicates the threshold below which cells were removed."}
+# Applied on the alternative experiment containing the ADT counts:
+library(scuttle)
+df.ab <- perCellQCMetrics(altExp(sce))
+
+ab.discard <- isOutlier(df.ab$detected, log=TRUE, type="lower", min_diff=1)
+summary(ab.discard)
+
+hist(df.ab$detected, col='grey', main="", xlab="Number of detected ADTs")
+abline(v=attr(ab.discard, "thresholds")["lower"], col="red", lty=2)
+```
+
+To elaborate on the `isOutlier()` call above:
+we set `min_diff=1` to specify that the threshold should be defined at least one log~2~-unit below the median.
+This ensures that cells will not be removed if they contain non-zero counts for more than half of the median number of detected features.
+We do not rely only on the default behavior of `isOutlier()` as the MAD is often zero in deeply sequenced datasets (i.e., where most cells contain non-zero counts for all ADTs) and filtering would discard useful cells that detect _almost_ all of the ADTs.
+
+Some experiments will include isotype control (IgG) antibodies that have similar properties to a primary antibody but lack a specific target in the cell, thus providing a measure of non-specific binding.
+Assuming that the magnitude of non-specific binding should be roughly constant across cells, we can define low-quality cells as those with unusually low coverage of the control ADTs, presumably due to failed capture or sequencing.
+This again uses our outlier-based approach; hard thresholds are more difficult to specify due to experiment-by-experiment variation in the expected coverage of ADTs. 
+
+```{r detected-con-hist, fig.cap="Distribution of the log-coverage of IgG control ADTs across all cells in the PBMC dataset. The red dotted line indicates the threshold below which cells were removed."}
+# We could have specified subsets= in the above perCellQCMetrics call, but it's
+# easier to explain one concept at a time, so we'll just repeat it here:
+controls <- grep("^Ig", rownames(altExp(sce)))
+df.ab2 <- perCellQCMetrics(altExp(sce), subsets=list(controls=controls))
+
+con.discard <- isOutlier(df.ab2$subsets_controls_sum, log=TRUE, type="lower")
+summary(con.discard)
+
+hist(log1p(df.ab2$subsets_controls_sum), col='grey', 
+    main="", xlab="Log-coverage of controls")
+abline(v=log1p(attr(ab.discard, "thresholds")["lower"]), col="red", lty=2)
+```
+
+The total ADT count is less useful as a QC metric because it is heavily correlated with the biological state of the cell.
+The presence of a targeted protein can lead to a several-fold increase in the total ADT count given the binary nature of most surface protein markers.
+Removing cells with low total ADTs would strongly penalize cell types that do not exhibit many (or any) of the selected protein targets, and would represent an extreme case of the issues discussed in Section \@ref(outlier-assumptions).
+
+Of course, if we want to analyze gene expression and ADT data together, we still need to apply quality control on the gene counts. 
+It is possible for a cell to have satisfactory ADT counts but poor QC metrics from the endogenous genes - for example, cell damage manifesting as high mitochondrial proportions would not be captured in the ADT data.
+More generally, the ADTs are synthetic, external to the cell and conjugated to antibodies, so it is not surprising that they would experience different cell-specific technical effects than the endogenous transcripts.
+This motivates a distinct QC step on the genes to ensure that we only retain high-quality cells in both feature spaces.
+Here, the count matrix has already been filtered by _Cellranger_ to remove empty droplets so we only filter on the mitochondrial proportions to remove putative low-quality cells.
 
 ```{r}
-library(scater)
 mito <- grep("^MT-", rowData(sce)$Symbol)
 df <- perCellQCMetrics(sce, subsets=list(Mito=mito))
 mito.discard <- isOutlier(df$subsets_Mito_percent, type="higher")
 summary(mito.discard)
 ```
 
-If we want to combine transcript and ADT data, it is prudent to ensure that we only retain cells that actually have ADT counts.
-Recall that droplet-based libraries will contain contamination from ambient solution (Section \@ref(qc-droplets)), in this case containing containing conjugated antibodies that are either free in solution or bound to cell fragments.
-As the ADTs are (relatively) deeply sequenced, we can expect non-zero counts for most ADTs in each cell due to contamination (Figure \@ref(fig:detected-ab-hist); if this is not the case, we may suspect some failure of ADT processing for that cell.
-We thus remove cells that have unusually low numbers of detected ADTs, defined here as half of the median across all cells.
-(We could use the MAD-based default behavior of `isOutlier()`, but the MAD is zero in this case and filtering would discard useful cells with almost all ADTs detected.)
-
-```{r detected-ab-hist, fig.cap="Distribution of the number of detected ADTs across all cells in the PBMC dataset. The red dotted line indicates the threshold below which cells were removed."}
-# Require a minimum fold-change of 2 from the median (converted into log2).
-ab.discard <- isOutlier(df$`altexps_Antibody Capture_detected`,
-    log=TRUE, type="lower", min_diff=1)
-summary(ab.discard)
-
-hist(df$`altexps_Antibody Capture_detected`, col='grey', 
-    main="", xlab="Number of detected ADTs")
-abline(v=attr(ab.discard, "thresholds")["lower"], col="red", lty=2)
-```
-
-By comparison, the total ADT count is less useful as a QC metric because it is heavily correlated with the biological state of the cell.
-The presence of a targeted protein can lead to a several-fold increase in the total ADT count given the binary nature of most surface protein markers.
-Removing cells with low total ADTs would strongly penalize cell types that do not exhibit many (or any) of the selected protein targets, and would represent an extreme case of the issues discussed in Section \@ref(outlier-assumptions).
-
 Finally, to remove the low-quality cells, we subset the `SingleCellExperiment` as previously described.
 This automatically applies the filtering to both the transcript and ADT data; such coordination is one of the advantages of storing both datasets in a single object.
 
 ```{r}
-discard <- ab.discard | mito.discard
+discard <- ab.discard | con.discard | mito.discard
 sce <- sce[,!discard]
 ```
 
-### Normalization
+## Normalization
+
+### Overview
 
 Counts for the ADTs are subject to several biases that must be normalized prior to further analysis.
 Capture efficiency varies from cell to cell though the differences in biophysical properties between endogenous transcripts and the (much shorter) ADTs means that the capture-related biases for the two sets of features are unlikely to be identical.
 Composition biases are also much more pronounced in ADT data due to (i) the binary nature of target protein abundances, where any increase in protein abundance manifests as a large increase to the total tag count; and (ii) the _a priori_ selection of interesting protein targets, which enriches for features that are more likely to be differentially abundant across the population.
 As in Chapter \@ref(normalization), we assume that these are scaling biases and compute ADT-specific size factors to remove them.
-To this end, several strategies are again available to calculate a size factor for each cell:
+To this end, several strategies are again available to calculate a size factor for each cell.
 
-1. The simplest approach is to normalize on the total ADT counts, effectively the library size for the ADTs.
+### Library size normalization
+
+The simplest approach is to normalize on the total ADT counts, effectively the library size for the ADTs.
 Like in Section \@ref(library-size-normalization), these "ADT library size factors" are adequate for clustering but will introduce composition biases that interfere with interpretation of the fold-changes between clusters.
-While composition biases are unlikely to compromise exploratory analyses like clustering, they may complicate interpretation of log-fold changes between clusters, especially for relatively subtle (e.g., ~2-fold) changes in the abundances of markers associated with functional activity rather than cell type.
+This is especially tue for relatively subtle (e.g., ~2-fold) changes in the abundances of markers associated with functional activity rather than cell type.
 
-    ```{r}
-    sf.lib <- librarySizeFactors(altExp(sce))
-    summary(sf.lib)
-    ```
+```{r}
+sf.lib <- librarySizeFactors(altExp(sce))
+summary(sf.lib)
+```
 
-    If we interpret the total count as the arithmetic mean of counts in each cell, we might instead consider the related approach of taking the geometric mean of all counts as the size factor for each cell [@stoeckius2017simultaneous].
-    The geometric mean is a reasonable estimator of the scaling biases for large counts with the added benefit that it mitigates the effects of composition biases by dampening the effects of one or two highly abundant proteins.
-    While more robust than the ADT library size factors, these geometric mean-based factors are still not entirely correct and will progressively become less accurate as upregulation increases in strength.
+We might instead consider the related approach of taking the geometric mean of all counts as the size factor for each cell [@stoeckius2017simultaneous].
+The geometric mean is a reasonable estimator of the scaling biases for large counts with the added benefit that it mitigates the effects of composition biases by dampening the impact of one or two highly abundant ADTs.
+While more robust than the ADT library size factors, these geometric mean-based factors are still not entirely correct and will progressively become less accurate as upregulation increases in strength.
 
-    ```{r}
-    library(scuttle)
-    sf.geo <- geometricSizeFactors(altExp(sce))
-    summary(sf.geo)
-    ```
+```{r}
+library(scuttle)
+sf.geo <- geometricSizeFactors(altExp(sce))
+summary(sf.geo)
+```
 
-2. Ideally, we would like to compute size factors that adjust for the composition biases.
+### Median-based normalization
+
+Ideally, we would like to compute size factors that adjust for the composition biases.
 This usually requires an assumption that most ADTs are not differentially expressed between cell types/states.
 At first glance, this appears to be a strong assumption - the target proteins were specifically chosen as they exhibit interesting heterogeneity across the population, meaning that a non-differential majority across ADTs would be unlikely.
 However, we can still make it work by assuming that (i) each cell only expresses a minority of the targeted proteins and (ii) the ambient contamination in each library is the same in terms of the number of molecules captured by each droplet.
 We can then compute size factors to equalize the coverage of these contaminating ADTs, thus eliminating cell-to-cell differences in capture efficiency.
-This is loosely based on a similar approach for normalization of ChIP-seq data based on background enrichment [@lun2016csaw].
+This is inspired by a similar approach for normalization of ChIP-seq data based on background enrichment [@lun2016csaw].
 
-    If possible, we would prefer to obtain an estimate of the ambient profile from the barcodes that were identified as empty droplets (Section \@ref(qc-droplets)).
-    In this case, though, this information has already been discarded from the provided dataset; we instead use a proxy profile constructed from the average of all cells, under the assumption that all cell types are equally likely to contribute to the ambient profile.
-    We define size factors using a `r Biocpkg("DESeq")`-like approach based on the median of the ratio of each cell's counts to the ambient profile.
+If possible, we would prefer to obtain an estimate of the ambient profile from the barcodes that were identified as empty droplets (Section \@ref(qc-droplets)).
+In this case, though, this information has already been discarded from the dataset as we only have the counts for cell-containing libraries.
+We instead use a proxy profile (Figure \@ref(fig:pbmc-adt-ambient-profile)) constructed by assuming that most cells exhibit ambient-level coverage for each ADT.
+This assumption suggests that each ADT should exhibit a bimodal distribution of log-counts across all cells, meaning that we can use all cells in the lower mode to compute the (presumably) ambient concentration.
 
-    ```{r}
-    # Replace 'ambient' with actual ambient profile, if available.
-    ambient <- rowMeans(counts(altExp(sce)))
-    sf.amb <- medianSizeFactors(altExp(sce), reference=ambient)
-    summary(sf.amb)
-    ```
+```{r pbmc-adt-ambient-profile, fig.cap="Inferred relative abundance of each ADT in the ambient solution of the the PBMC dataset."}
+# Replace 'ambient' with actual ambient profile, if available.
+ambient <- inferAmbience(counts(altExp(sce)))
+barplot(ambient, las=2, ylab="Relative ambient ambience")
+```
 
-    In one subpopulation, the DESeq-like size factors are consistently larger than the ADT library size factors, whereas the opposite is true for most of the other subpopulations (Figure \@ref(fig:comp-bias-norm)).
-    This is consistent with the presence of composition biases due to differential abundance of the targeted proteins between subpopulations.
-    Here, composition biases would introduce a spurious 2-fold change in normalized ADT abundance if the library size factors were used.
+We use a `r Biocpkg("DESeq2")`-like approach to compute size factors based on the ambient profile.
+Specifically, the size factor for each cell is defined as the median of the ratios of that cell's counts to the ambient profile.
+If the abundances for most ADTs in each cell are ambient-derived, they should be roughly constant across cells;
+any systematic differences in the ratios correspond to cell-specific biases in sequencing coverage and are captured by the size factor.
+The use of the median protects against the minority of ADTs corresponding to genuinely expressed markers.
 
-    ```{r comp-bias-norm, fig.cap="DESeq-like size factors for each cell in the PBMC dataset, compared to ADT library size factors. Each point is a cell and is colored according to the cluster identity defined from normalized ADT data."}
-    # Coloring by cluster to highlight the composition biases.
-    # We set k=20 to get fewer, broader clusters for a clearer picture.
-    library(scran)
-    tagdata <- logNormCounts(altExp(sce)) # library size factors by default.
-    g <- buildSNNGraph(tagdata, k=20, d=NA) # no need for PCA, see below.
-    clusters <- igraph::cluster_walktrap(g)$membership
+```{r}
+sf.amb <- medianSizeFactors(altExp(sce), reference=ambient)
+summary(sf.amb)
+```
 
-    plot(sf.lib, sf.amb, log="xy", col=clusters, 
-        xlab="Library size factors (tag)",
-        ylab="DESeq-like size factors (tag)")
-    abline(0, 1, col="grey", lty=2)
-    ```
+In one subpopulation, the size factors are consistently larger than the ADT library size factors, whereas the opposite is true for most of the other subpopulations (Figure \@ref(fig:comp-bias-norm)).
+This is consistent with the presence of composition biases due to differential abundance of the targeted proteins between subpopulations.
+Here, composition biases would introduce a spurious 2-fold change in normalized ADT abundance if the library size factors were used.
 
-    ```{r, echo=FALSE, results="hide"}
-    # Checking my trash talk.
-    by.clust <- split(log2(sf.lib/sf.amb), clusters)
-    med.clust <- vapply(by.clust, median, 0)
-    stopifnot(diff(range(med.clust)) > 1)
-    ```
+```{r comp-bias-norm, fig.cap="DESeq-like size factors for each cell in the PBMC dataset, compared to ADT library size factors. Each point is a cell and is colored according to the cluster identity defined from normalized ADT data."}
+# Coloring by cluster to highlight the composition biases.
+# We set k=20 to get fewer, broader clusters for a clearer picture.
+library(scran)
+tagdata <- logNormCounts(altExp(sce)) # library size factors by default.
+g <- buildSNNGraph(tagdata, k=20, d=NA) # no need for PCA, see below.
+clusters <- igraph::cluster_walktrap(g)$membership
 
-3. Some experiments will include isotype control antibodies that have similar properties to a primary antibody but lack a specific target in the cell, thus providing a measure of non-specific binding.
-As with spike-in normalization (Section \@ref(spike-norm)), we could make the assumption that these control ADTs should not be differentially abundant between cells. 
-Any difference thus represents some bias that should be normalized by defining control-based size factors from the sum of counts over all control ADTs.
-We demonstrate this approach below by computing size factors from the immunoglobulin (IgG) controls (Figure \@ref(fig:control-bias-norm)).
+plot(sf.lib, sf.amb, log="xy", col=clusters, 
+    xlab="Library size factors (tag)",
+    ylab="DESeq-like size factors (tag)")
+abline(0, 1, col="grey", lty=2)
+```
 
-    ```{r control-bias-norm, fig.cap="IgG control-derived size factors for each cell in the PBMC dataset, compared to the DESeq-like size factors."}
-    controls <- grep("^Ig", rownames(altExp(sce)))
-    sf.control <- librarySizeFactors(altExp(sce), subset_row=controls) 
-    summary(sf.control)
+```{r, echo=FALSE, results="hide"}
+# Checking my trash talk.
+by.clust <- split(log2(sf.lib/sf.amb), clusters)
+med.clust <- vapply(by.clust, median, 0)
+stopifnot(diff(range(med.clust)) > 1)
+```
 
-    plot(sf.amb, sf.control, log="xy", 
-        xlab="DESeq-like size factors (tag)",
-        ylab="Control size factors (tag)")
-    abline(0, 1, col="grey", lty=2)
-    ```
+### Control-based normalization
 
-    This approach exchanges the previous assumption of a non-differential majority for another assumption about the lack of differential abundance in the control tags.
-    We might feel that the latter is a generally weaker assumption, but it is possible for non-specific binding to vary due to biology (e.g., when the cell surface area increases), at which point this normalization strategy may not be appropriate.
-   
-We suggest using the DESeq-like size factors by default, as these are the most general and eliminate the major problems with composition biases.
-Running `logNormCounts()` will then perform scaling normalization and log-transformation for both the endogenous transcripts and the ADTs using their respective size factors.
+If control ADTs are available, we could make the assumption that they should not be differentially abundant between cells. 
+Any difference thus represents some bias that should be normalized by defining control-based size factors from the sum of counts over all control ADTs, analogous to spike-in normalization (Section \@ref(spike-norm)), 
+We demonstrate this approach below by computing size factors from the IgG controls (Figure \@ref(fig:control-bias-norm)).
+
+```{r control-bias-norm, fig.cap="IgG control-derived size factors for each cell in the PBMC dataset, compared to the DESeq-like size factors."}
+controls <- grep("^Ig", rownames(altExp(sce)))
+sf.control <- librarySizeFactors(altExp(sce), subset_row=controls) 
+summary(sf.control)
+
+plot(sf.amb, sf.control, log="xy", 
+    xlab="DESeq-like size factors (tag)",
+    ylab="Control size factors (tag)")
+abline(0, 1, col="grey", lty=2)
+```
+
+This approach exchanges the previous assumption of a non-differential majority for another assumption about the lack of differential abundance in the control tags.
+We might feel that the latter is a generally weaker assumption, but it is possible for non-specific binding to vary due to biology (e.g., when the cell surface area increases), at which point this normalization strategy may not be appropriate.
+It also relies on sufficient coverage of the control ADTs, which is not always possible in well-executed experiments where there is little non-specific binding to provide such counts.
+
+### Computing log-normalized values
+
+We suggest using the median-based size factors by default, as they are generally applicable and eliminate most problems with composition biases.
+We set the size factors for the ADT data by calling `sizeFactors()` on the relevant `altExp()`.
+In contrast, `sizeFactors(sce)` refers to size factors for the gene counts, which are usually quite different.
 
 ```{r}
 sizeFactors(altExp(sce)) <- sf.amb
-sce <- logNormCounts(sce, use_altexps=TRUE)
+```
+
+Regardless of which size factors are chosen, running `logNormCounts()` will then perform scaling normalization and log-transformation for both the endogenous transcripts and the ADTs using their respective size factors.
+
+```{r}
+sce <- logNormCounts(sce, use.altexps=TRUE)
 
 # Checking that we have normalized values:
 assayNames(sce)
@@ -224,6 +273,7 @@ g.adt <- buildSNNGraph(altExp(sce), d=NA)
 clusters.adt <- igraph::cluster_walktrap(g.adt)$membership
 
 # Generating a t-SNE plot.
+library(scater)
 set.seed(1010010)
 altExp(sce) <- runTSNE(altExp(sce))
 colLabels(altExp(sce)) <- factor(clusters.adt)
@@ -284,7 +334,7 @@ stopifnot(cor(log(ncells), log(nsubclusters))> 0.5)
 ```
 
 ```{r, echo=FALSE}
-chosen.cluster <- "12"
+chosen.cluster <- "11"
 ```
 
 Another benefit of subclustering is that we can use the annotation on the ADT-derived clusters to facilitate annotation of each subcluster.
@@ -294,7 +344,7 @@ Subclustering is also conceptually appealing as it avoids comparing log-fold cha
 This ensures that variation (or noise) from the transcript counts does not compromise cell type/state identification from the relatively cleaner ADT counts.
 
 ```{r gzmh-cd8-t, fig.wide=TRUE, fig.asp=0.5, fig.cap="Distribution of log-normalized expression values of _GZMH_ (left) and _GZHK_ (right) in transcript-derived subclusters of a ADT-derived subpopulation of CD8^+^ T cells."}
-of.interest <- "12"
+of.interest <- "11"
 plotExpression(all.sce[[of.interest]], x="subcluster",
     features=c("ENSG00000100450", "ENSG00000113088"))
 ```
@@ -307,8 +357,8 @@ stopifnot(averaged["CD8a",of.interest] > 10)
 cur.sce <- all.sce[[chosen.cluster]]
 cur.markers <- findMarkers(cur.sce, cur.sce$subcluster, direction="up")
 stopifnot(length(cur.markers)==2L)
-stopifnot("ENSG00000100450" %in% rownames(cur.markers[[1]])[1:10])
-stopifnot("ENSG00000113088" %in% rownames(cur.markers[[2]])[1:10])
+stopifnot("ENSG00000113088" %in% rownames(cur.markers[[1]])[1:10])
+stopifnot("ENSG00000100450" %in% rownames(cur.markers[[2]])[1:10])
 ```
 
 The downside is that relying on previous results increases the risk of misleading conclusions when ambiguities in those results are not considered, as previously discussed in Section \@ref(subclustering).
@@ -436,7 +486,7 @@ plotTSNE(sce, colour_by="label", text_by="label")
 ```
 
 ```{r, echo=FALSE}
-chosen.cluster <- 16
+chosen.cluster <- 13
 ```
 
 We demonstrate this approach using `findMarkers()` to test for differences in tag abundance between clusters (Chapter \@ref(marker-detection)).
@@ -445,7 +495,7 @@ Methods from Chapter \@ref(multi-sample-comparisons) can be similarly used to te
 
 ```{r heat-pd-1, fig.cap=sprintf("Heatmap of log-fold changes in tag abundances in cluster %s compared to all other clusters identified from transcript data in the PBMC data set.", chosen.cluster)}
 markers <- findMarkers(altExp(sce), colLabels(sce))
-of.interest <- markers[[16]]
+of.interest <- markers[[13]]
 pheatmap(getMarkerEffects(of.interest), breaks=seq(-3, 3, length.out=101))
 ```
 
