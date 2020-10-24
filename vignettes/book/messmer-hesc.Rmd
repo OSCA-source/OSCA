@@ -149,6 +149,9 @@ sce.mess <- correctExperiments(sce.mess,
 
 ## Dimensionality Reduction
 
+We could have set `d=` and `subset.row=` in `correctExperiments()` to automatically perform a PCA on the the residual matrix with the subset of HVGs,
+but we'll just explicitly call `runPCA()` here to keep things simple.
+
 ```{r dimensionality-reduction}
 set.seed(1101001)
 sce.mess <- runPCA(sce.mess, subset_row = top.hvgs, exprs_values = "corrected")
@@ -178,10 +181,6 @@ background <- sce.mess[,is.bg]
 
 mat.target <- t(assay(target, "corrected")[top.hvgs,])
 mat.background <- t(assay(background, "corrected")[top.hvgs,])
-
-# TODO: get Phillipe to fix this so we can pass DelayedMatrices in directly.
-mat.target <- as.matrix(mat.target)
-mat.background <- as.matrix(mat.background)
 
 set.seed(1010101001)
 con_out <- scPCA(
@@ -246,8 +245,8 @@ c(naive=mean(scN$width), primed=mean(scP$width))
 ```{r, echo=FALSE}
 # Sanity check for reduction in the silhouette.
 original <- c(naive=mean(N$width), primed=mean(P$width))
-stopifnot(all(original > c(naive=mean(cN$width), primed=mean(cP$width))))
-stopifnot(all(original > c(naive=mean(scN$width), primed=mean(scP$width))))
+stopifnot(all(original > 2* c(naive=mean(cN$width), primed=mean(cP$width))))
+stopifnot(all(original > 2 *c(naive=mean(scN$width), primed=mean(scP$width))))
 ```
 
 ## Session Info {-}

@@ -96,6 +96,8 @@ In contrast, approaches based on taking the intersection or union of HVGs across
 
 Before we actually perform any correction, it is worth examining whether there is any batch effect in this dataset.
 We combine the two `SingleCellExperiment`s and perform a PCA on the log-expression values for all genes with positive (average) biological components.
+In this example, our datasets are file-backed and so we instruct `runPCA()` to use randomized PCA for greater efficiency - 
+see Section \@ref(big-data-svd) for more details - though the default IRLBA will suffice for more common in-memory representations.
 
 ```{r}
 # Synchronizing the metadata for cbind()ing.
@@ -176,8 +178,11 @@ However, at least one batch-specific cluster is still present, indicating that t
 This is attributable to violation of one of the aforementioned assumptions, even in this simple case involving replicated batches. 
 
 ```{r}
-set.seed(1010101010) # To ensure reproducibility of IRLBA.
-rescaled <- runPCA(rescaled, subset_row=chosen.hvgs, exprs_values="corrected")
+# To ensure reproducibility of the randomized PCA.
+set.seed(1010101010) 
+rescaled <- runPCA(rescaled, subset_row=chosen.hvgs, 
+    exprs_values="corrected",
+    BSPARAM=BiocSingular::RandomParam())
 
 snn.gr <- buildSNNGraph(rescaled, use.dimred="PCA")
 clusters.resc <- igraph::cluster_walktrap(snn.gr)$membership
@@ -190,7 +195,7 @@ stopifnot(any(tab.resc==0)) # Check the text above was correct.
 stopifnot(mean(rowSums(tab.resc==0)==1) < 0.1) # Most clusters have non-zero contributions.
 ```
 
-```{r tsne-pbmc-rescaled, fig.asp=0.5, fig.cap="$t$-SNE plot of the PBMC datasets after correction with `rescaleBatches()`. Each point represents a cell and is colored according to the batch of origin."}
+```{r tsne-pbmc-rescaled, fig.cap="$t$-SNE plot of the PBMC datasets after correction with `rescaleBatches()`. Each point represents a cell and is colored according to the batch of origin."}
 rescaled <- runTSNE(rescaled, dimred="PCA")
 rescaled$batch <- factor(rescaled$batch)
 plotTSNE(rescaled, colour_by="batch")
@@ -198,11 +203,26 @@ plotTSNE(rescaled, colour_by="batch")
 
 Alternatively, we could use the `regressBatches()` function to perform a more conventional linear regression for batch correction.
 This is subject to the same assumptions as described above for `rescaleBatches()`, though it has the additional disadvantage of discarding sparsity in the matrix of residuals.
-(We do put in some effort to mitigate the loss of efficiency by avoiding explicit calculation of the residuals, see `?ResidualMatrix` for details.)
+To avoid this, we avoid explicit calculation of the residuals during matrix multiplication (see `?ResidualMatrix` for details), allowing us to perform approximate PCA more efficiently.
+Advanced users can set `design=` and specify which coefficients to retain in the output matrix, reminiscent of `r Biocpkg("limma")`'s `removeBatchEffect()` function.
+
+```{r tsne-pbmc-residuals, fig.cap="$t$-SNE plot of the PBMC datasets after correction with `regressBatches()`. Each point represents a cell and is colored according to the batch of origin."}
+set.seed(10001)
+residuals <- regressBatches(pbmc3k, pbmc4k, d=50,
+    subset.row=chosen.hvgs, correct.all=TRUE,
+    BSPARAM=BiocSingular::RandomParam())
+    
+snn.gr <- buildSNNGraph(residuals, use.dimred="corrected")
+clusters.resid <- igraph::cluster_walktrap(snn.gr)$membership
+tab.resid <- table(Cluster=clusters.resid, Batch=residuals$batch)
+tab.resid
+
+residuals <- runTSNE(residuals, dimred="corrected")
+residuals$batch <- factor(residuals$batch)
+plotTSNE(residuals, colour_by="batch")
+```
 
 ## Performing MNN correction
-
-### Algorithm overview
 
 Consider a cell $a$ in batch $A$, and identify the cells in batch $B$ that are nearest neighbors to $a$ in the expression space defined by the selected features.
 Repeat this for a cell $b$ in batch $B$, identifying its nearest neighbors in $A$.
@@ -215,8 +235,6 @@ This is because it learns the shared population structure via identification of 
 Instead, the key assumption of MNN-based approaches is that the batch effect is orthogonal to the biology in high-dimensional expression space.
 Violations reduce the effectiveness and accuracy of the correction, with the most common case arising from variations in the direction of the batch effect between clusters.
 Nonetheless, the assumption is usually reasonable as a random vector is very likely to be orthogonal in high-dimensional space.
-
-### Application to the PBMC data
 
 The `r Biocpkg("batchelor")` package provides an implementation of the MNN approach via the `fastMNN()` function.
 (Unlike the MNN method originally described by @haghverdi2018batch, the `fastMNN()` function performs PCA to reduce the dimensions beforehand and speed up the downstream neighbor detection steps.)
@@ -259,10 +277,6 @@ This can be interpreted as the minimum anticipated frequency of any shared cell 
 Increasing `k` will generally result in more aggressive merging as the algorithm is more generous in matching subpopulations across batches.
 It can occasionally be desirable to increase `k` if one clearly sees that the same cell types are not being adequately merged across batches.
 
-See Chapter \@ref(merged-pancreas) for an example of a more complex `fastMNN()` merge involving several human pancreas datasets generated by different authors on different patients with different technologies.
-
-### Correction diagnostics 
-
 We cluster on the low-dimensional corrected coordinates to obtain a partitioning of the cells that serves as a proxy for the population structure.
 If the batch effect is successfully corrected, clusters corresponding to shared cell types or states should contain cells from multiple batches.
 We see that all clusters contain contributions from each batch after correction, consistent with our expectation that the two batches are replicates of each other.
@@ -278,6 +292,12 @@ tab.mnn
 ```{r, echo=FALSE}
 stopifnot(all(tab.mnn>0)) # Check the text above was correct.
 ```
+
+See Chapter \@ref(merged-pancreas) for an example of a more complex `fastMNN()` merge involving several human pancreas datasets generated by different authors on different patients with different technologies.
+
+## Correction diagnostics 
+
+### Mixing between batches
 
 It is possible to quantify the degree of mixing across batches by testing each cluster for imbalances in the contribution from each batch [@buttner2019test].
 This is done by applying Pearson's chi-squared test to each row of `tab.mnn` where the expected proportions under the null hypothesis proportional to the total number of cells per batch.
@@ -349,9 +369,7 @@ Large proportions of lost variance (>10%) suggest that correction is removing ge
 This would occur due to violations of the assumption of orthogonality between the batch effect and the biological subspace [@haghverdi2018batch].
 In this case, the proportion of lost variance is small, indicating that non-orthogonality is not a major concern.
 
-## Preserving biological heterogeneity
-
-### Comparison to within-batch clusters
+### Preserving biological heterogeneity
 
 Another useful diagnostic check is to compare the clustering within each batch to the clustering of the merged data.
 Accurate data integration should preserve variance within each batch as there should be nothing to remove between cells in the same batch.
@@ -419,7 +437,7 @@ heat4k <- pheatmap(tab, cluster_row=FALSE, cluster_col=FALSE,
 gridExtra::grid.arrange(heat3k[[4]], heat4k[[4]])
 ```
 
-### Encouraging consistency with marker genes {#integration-with-markers}
+## Encouraging consistency with marker genes {#integration-with-markers}
 
 In some situations, we will already have performed within-batch analyses to characterize salient aspects of population heterogeneity.
 This is not uncommon when merging datasets from different sources where each dataset has already been analyzed, annotated and interpreted separately.

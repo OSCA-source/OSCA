@@ -227,7 +227,7 @@ stopifnot(tab["G1",3] > 0.5 * sum(tab[,3]))
 
 library(bluster)
 rand <- pairwiseRand(singler.assignments$labels, assignments$phases, mode="index")
-stopifnot(rand > 0.7)
+stopifnot(rand > 0.6)
 ```
 
 The same considerations and caveats described for the `r Biocpkg("SingleR")`-based approach are also applicable here.

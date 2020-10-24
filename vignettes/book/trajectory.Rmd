@@ -55,6 +55,8 @@ The choice between these two perspectives is left to the analyst based on which 
 
 ### Cluster-based minimum spanning tree
 
+#### Basic steps
+
 The `r Biocpkg("TSCAN")` algorithm uses a simple yet effective approach to trajectory reconstruction.
 It uses the clustering to summarize the data into a smaller set of discrete units, computes cluster centroids by averaging the coordinates of its member cells, and then forms the minimum spanning tree (MST) across those centroids.
 The MST is simply an undirected acyclic graph that passes through each centroid exactly once and is thus the most parsimonious structure that captures the transitions between clusters.
@@ -102,7 +104,7 @@ Each column contains one pseudotime ordering and corresponds to one path from th
 Some cells may be shared across multiple paths, in which case they will have the same pseudotime in those paths.
 We can then examine the pseudotime ordering on our desired visualization as shown in Figure \@ref(fig:tscan-nest-pseudo).
 
-```{r tscan-nest-pseudo, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using a _TSCAN_-like algorithm is overlaid on top."}
+```{r tscan-nest-pseudo, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using _TSCAN_ is overlaid on top."}
 # Taking the rowMeans just gives us a single pseudo-time for all cells. Cells
 # in segments that are shared across paths have the same pseudo-time value for
 # those paths anyway, so the rowMeans doesn't change anything.
@@ -124,7 +126,9 @@ pseudo.all <- quickPseudotime(sce.nest, use.dimred="PCA")
 head(pseudo.all$ordering)
 ```
 
-The MST can also be constructed with an "outgroup" to avoid connecting unrelated populations in the dataset.
+#### Tweaking the MST
+
+The MST can be constructed with an "outgroup" to avoid connecting unrelated populations in the dataset.
 Based on the OMEGA cluster concept from @street2018slingshot,
 the outgroup is an artificial cluster that is equidistant from all real clusters at some threshold value.
 If the original MST _sans_ the outgroup contains an edge that is longer than twice the threshold,
@@ -142,6 +146,26 @@ plot(pseudo.og$mst)
 ```{r, echo=FALSE}
 stopifnot(igraph::components(pseudo.og$mst)$no == 2)
 ```
+
+Another option is to construct the MST based on distances between mutual nearest neighbor (MNN) pairs between clusters (Section \@ref(performing-mnn-correction)).
+This exploits the fact that MNN pairs occur at the boundaries of two clusters, with short distances between paired cells meaning that the clusters are "touching".
+In this mode, the MST focuses on the connectivity between clusters, which can be different from the shortest distance between centroids (Figure \@ref(fig:tscan-nest-mnn)).
+Consider, for example, a pair of elongated clusters that are immediately adjacent to each other.
+A large distance between their centroids precludes the formation of the obvious edge with the default MST construction;
+in contrast, the MNN distance is very low and encourages the MST to create a connection between the two clusters.
+
+```{r tscan-nest-mnn, fig.cap="$t$-SNE plot of the Nestorowa HSC dataset, where each point is a cell and is colored according to its pseudotime value. The MST obtained using _TSCAN_ with MNN distances is overlaid on top."}
+pseudo.mnn <- quickPseudotime(sce.nest, use.dimred="PCA", with.mnn=TRUE)
+mnn.pseudo <- rowMeans(pseudo.mnn$ordering, na.rm=TRUE)
+plotTSNE(sce.nest, colour_by=I(mnn.pseudo), text_by="label", text_colour="red") +
+    geom_line(data=pseudo.mnn$connected$TSNE, mapping=aes(x=dim1, y=dim2, group=edge))
+```
+
+```{r, echo=FALSE}
+stopifnot(!isTRUE(all.equal(pseudo.mnn$ordering, tscan.pseudo)))
+```
+
+#### Further comments
 
 The `r Biocpkg("TSCAN")` approach derives several advantages from using clusters to form the MST.
 The most obvious is that of computational speed as calculations are performed over clusters rather than cells.
