@@ -79,6 +79,29 @@ dec.pbmc[order(dec.pbmc$bio, decreasing=TRUE),]
 (Careful readers will notice that some genes have negative biological components, which have no obvious interpretation and can be ignored in most applications.
 They are inevitable when fitting a trend to the per-gene variances as approximately half of the genes will lie below the trend.)
 
+The trend fit has several useful parameters (see `?fitTrendVar`) that can be tuned for a more appropriate fit.
+For example, the defaults can occasionally yield an overfitted trend when the few high-abundance genes are also highly variable.
+In such cases, users can reduce the contribution of those high-abundance genes by turning off density weights,
+as demonstrated in Figure \@ref(fig:trend-plot-seger-noweight) with a single donor from the @segerstolpe2016singlecell dataset.
+
+```{r, echo=FALSE, results="asis"}
+extractCached("segerstolpe-pancreas.Rmd", "normalization", "sce.seger")
+```
+
+```{r trend-plot-seger-noweight, fig.cap="Variance in the Segerstolpe pancreas data set as a function of the mean. Each point represents a gene while the lines represent the trend fitted to all genes with default parameters (blue) or without weights (red)."}
+sce.seger <- sce.seger[,sce.seger$Donor=="HP1507101"]
+dec.default <- modelGeneVar(sce.seger)
+dec.noweight <- modelGeneVar(sce.seger, density.weights=FALSE)
+
+fit.default <- metadata(dec.default)
+plot(fit.default$mean, fit.default$var, xlab="Mean of log-expression",
+    ylab="Variance of log-expression") 
+curve(fit.default$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+fit.noweight <- metadata(dec.noweight)
+curve(fit.noweight$trend(x), col="red", add=TRUE, lwd=2)
+legend("topleft", col=c("dodgerblue", "red"), legend=c("Default", "No weight"), lwd=2)
+```
+
 ### Coefficient of variation
 
 An alternative approach to quantification uses the squared coefficient of variation (CV^2^) of the normalized expression values prior to log-transformation.

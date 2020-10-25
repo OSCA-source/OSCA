@@ -105,7 +105,7 @@ doublet-detection.md: doublet-detection.Rmd bach-mammary.md
 clustering.md: clustering.Rmd tenx-unfiltered-pbmc4k.md lun-416b.md
 	R -e "knitr::knit('clustering.Rmd')"
 
-feature-selection.md: feature-selection.Rmd tenx-unfiltered-pbmc4k.md lun-416b.md
+feature-selection.md: feature-selection.Rmd tenx-unfiltered-pbmc4k.md segerstolpe-pancreas.md lun-416b.md
 	R -e "knitr::knit('feature-selection.Rmd')"
 
 quality-control.md: quality-control.Rmd tenx-unfiltered-pbmc4k.md zeisel-brain.md lun-416b.md
