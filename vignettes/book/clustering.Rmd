@@ -202,6 +202,10 @@ stopifnot(length(unique(clust.fast)) < length(unique(clust)))
 stopifnot(length(unique(clust.infomap)) > length(unique(clust)))
 ```
 
+Pipelines involving `r Biocpkg("scran")` default to rank-based weights followed by Walktrap clustering.
+In contrast, `r CRANpkg("Seurat")` uses Jaccard-based weights followed by Louvain clustering.
+Both of these strategies work well, and it is likely that the same could be said for many other combinations of weighting schemes and community detection algorithms.
+
 Some community detection algorithms operate by agglomeration and thus can be used to construct a hierarchical dendrogram based on the pattern of merges between clusters.
 The dendrogram itself is not particularly informative as it simply describes the order of merge steps performed by the algorithm; unlike the dendrograms produced by hierarchical clustering (Section \@ref(hierarchical-clustering)), it does not capture the magnitude of differences between subpopulations.
 However, it does provide a convenient avenue for manually tuning the clustering resolution by generating nested clusterings using the `cut_at()` function, as shown below.
@@ -212,9 +216,21 @@ table(igraph::cut_at(community.walktrap, n=5))
 table(igraph::cut_at(community.walktrap, n=20))
 ```
 
-Pipelines involving `r Biocpkg("scran")` default to rank-based weights followed by Walktrap clustering.
-In contrast, `r CRANpkg("Seurat")` uses Jaccard-based weights followed by Louvain clustering.
-Both of these strategies work well, and it is likely that the same could be said for many other combinations of weighting schemes and community detection algorithms.
+If `cut_at()`-like functionality is desired for non-hierarchical methods, `r Biocpkg("bluster")` provides a `mergeCommunities()` function to retrospectively tune the clustering resolution.
+This function will greedily merge pairs of clusters until a specified number of clusters is achieved, where pairs are chosen to maximize the modularity at each merge step.
+
+```{r}
+community.louvain <- igraph::cluster_louvain(g)
+table(community.louvain$membership)
+try(igraph::cut_at(community.louvain, n=10)) # Not hierarchical.
+merged <- mergeCommunities(g, community.louvain$membership, number=10)
+table(merged)
+```
+
+```{r, echo=FALSE}
+stopifnot(nlevels(merged) < nlevels(factor(community.louvain$membership)))
+stopifnot(is(try(igraph::cut_at(community.louvain, n=10), silent=TRUE), "try-error")) 
+```
 
 ### Assessing cluster separation
 
