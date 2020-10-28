@@ -193,6 +193,7 @@ This entire calculation is performed by the `inferAmbience()` function, which wa
 baseline <- inferAmbience(counts(altExp(sce)))
 head(baseline)
 
+library(scater)
 plotExpression(altExp(sce), features=rownames(altExp(sce)), exprs_values="counts") +
     scale_y_log10() + 
     geom_point(data=data.frame(x=names(baseline), y=baseline), mapping=aes(x=x, y=y), cex=3)
