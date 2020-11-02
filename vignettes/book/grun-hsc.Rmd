@@ -1,4 +1,4 @@
-# Grun mouse HSC (CEL-seq) {#merged-hcsc}
+# Grun mouse HSC (CEL-seq) 
 
 ```{r unref-setup, cache=FALSE, echo=FALSE, results="asis"}
 library(rebook)
