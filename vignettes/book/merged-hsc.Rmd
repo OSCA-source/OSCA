@@ -158,9 +158,9 @@ plotUMAP(merged, colour_by=I(common.pseudo),
 ```
 
 ```{r, echo=FALSE}
-stopifnot(igraph::are_adjacent(pseudo.out$mst, "1", "9"))
-stopifnot(igraph::are_adjacent(pseudo.out$mst, "1", "4"))
-stopifnot(igraph::are_adjacent(pseudo.out$mst, "7", "4"))
+stopifnot(igraph::are_adjacent(pseudo.out$mst, "2", "5"))
+stopifnot(igraph::are_adjacent(pseudo.out$mst, "5", "8"))
+stopifnot(!igraph::are_adjacent(pseudo.out$mst, "9", "8"))
 ```
 
 To fix this, we construct the minimum spanning tree using distances based on pairs of mutual nearest neighbors between clusters.
@@ -180,9 +180,9 @@ plotUMAP(merged, colour_by=I(common.pseudo2),
 ```
 
 ```{r, echo=FALSE}
-stopifnot(igraph::are_adjacent(pseudo.out2$mst, "1", "9"))
-stopifnot(igraph::are_adjacent(pseudo.out2$mst, "1", "4"))
-stopifnot(igraph::are_adjacent(pseudo.out2$mst, "7", "9"))
+stopifnot(igraph::are_adjacent(pseudo.out2$mst, "2", "5"))
+stopifnot(!igraph::are_adjacent(pseudo.out2$mst, "5", "8"))
+stopifnot(igraph::are_adjacent(pseudo.out2$mst, "9", "8"))
 ```
 
 ## Session Info {-}
