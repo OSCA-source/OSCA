@@ -436,28 +436,21 @@ Here, we perform two rounds of UMAP; one round retains high dimensionality for a
 This yields an extremely fine-grained clustering in Figure \@ref(fig:combined-umap), which is attributable to the stringency of intersection operations for defining the local neighborhood.
 
 ```{r combined-umap, fig.cap="UMAP plot obtained by combining transcript and ADT data in the PBMC dataset. Each point represents a cell and is colored according to its assigned cluster."}
-# See https://umap-learn.readthedocs.io/en/latest/clustering.html
-# for the choice of umap parameters.
 set.seed(1001010)
-combined2 <- runMultiUMAP(
-    list(reducedDim(sce.main, "PCA"), 
-        t(logcounts(altExp(sce.main)))),
-    n_components=20, n_neighbors=30, min_dist=0
-)
+sce.main <- runMultiUMAP(sce.main, dimred="PCA", 
+    altexp="Antibody Capture", n_components=50)
 
-g.com2 <- buildSNNGraph(combined2, d=NA, transposed=TRUE)
+# Bumping up 'k' for less granularity.
+g.com2 <- buildSNNGraph(sce.main, k=20, use.dimred="MultiUMAP") 
 clusters.com2 <- igraph::cluster_walktrap(g.com2)$membership
 table(clusters.com2)
 
 # Combining again for visualization:
 set.seed(0101110)
-reducedDim(sce.main, "combinedUMAP") <- runMultiUMAP(
-    list(reducedDim(sce.main, "PCA"), 
-        t(logcounts(altExp(sce.main))))
-)
+sce.main <- runMultiUMAP(sce.main, dimred="PCA", 
+    altexp="Antibody Capture", name="MultiUMAP2")
 colLabels(sce.main) <- clusters.com2
-plotReducedDim(sce.main, "combinedUMAP", 
-    colour_by="label", text_by="label")
+plotReducedDim(sce.main, "MultiUMAP2", colour_by="label", text_by="label")
 ```
 
 ```{r, echo=FALSE}
@@ -470,7 +463,7 @@ An even more sophisticated approach uses factor analysis to identify common and 
 The set of factors can then be used as low-dimensional coordinates for each cell in downstream analyses, though a number of additional statistics are also computed that may be useful, e.g., the contribution of each feature to each factor.
 
 ```{r}
-# Waiting for MOFA2. If you see Godot, remind him that he owes me money.
+# Waiting for MOFA2. 
 ```
 
 These combined strategies are convenient but do not consider (or implicitly make assumptions about) the importance of heterogeneity in the ADT data relative to the transcript data.
