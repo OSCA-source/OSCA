@@ -29,9 +29,8 @@ extractCached("grun-hsc.Rmd", "quality-control", "sce.grun.hsc")
 ```
 
 ```{r}
-sce.grun.hsc <- sce.grun.hsc[,sce.grun.hsc$protocol=="sorted hematopoietic stem cells"]
-
 library(scuttle)
+sce.grun.hsc <- sce.grun.hsc[,sce.grun.hsc$protocol=="sorted hematopoietic stem cells"]
 sce.grun.hsc <- logNormCounts(sce.grun.hsc)
 
 library(scran)
@@ -48,6 +47,8 @@ extractCached("paul-hsc.Rmd", "quality-control", "sce.paul")
 ```{r}
 sce.paul <- sce.paul[,sce.paul$Batch_desc=="Unsorted myeloid"]
 sce.paul <- logNormCounts(sce.paul)
+
+set.seed(00010010)
 dec.paul <- modelGeneVarByPoisson(sce.paul) 
 ```
 
@@ -158,9 +159,10 @@ plotUMAP(merged, colour_by=I(common.pseudo),
 ```
 
 ```{r, echo=FALSE}
-stopifnot(igraph::are_adjacent(pseudo.out$mst, "2", "5"))
-stopifnot(igraph::are_adjacent(pseudo.out$mst, "5", "8"))
-stopifnot(!igraph::are_adjacent(pseudo.out$mst, "9", "8"))
+stopifnot(igraph::are_adjacent(pseudo.out$mst, "10", "4"))
+stopifnot(igraph::are_adjacent(pseudo.out$mst, "7", "1"))
+stopifnot(igraph::are_adjacent(pseudo.out$mst, "1", "4"))
+stopifnot(!igraph::are_adjacent(pseudo.out$mst, "7", "10"))
 ```
 
 To fix this, we construct the minimum spanning tree using distances based on pairs of mutual nearest neighbors between clusters.
@@ -180,9 +182,10 @@ plotUMAP(merged, colour_by=I(common.pseudo2),
 ```
 
 ```{r, echo=FALSE}
-stopifnot(igraph::are_adjacent(pseudo.out2$mst, "2", "5"))
-stopifnot(!igraph::are_adjacent(pseudo.out2$mst, "5", "8"))
-stopifnot(igraph::are_adjacent(pseudo.out2$mst, "9", "8"))
+stopifnot(igraph::are_adjacent(pseudo.out2$mst, "10", "7"))
+stopifnot(igraph::are_adjacent(pseudo.out2$mst, "7", "1"))
+stopifnot(igraph::are_adjacent(pseudo.out2$mst, "1", "4"))
+stopifnot(!igraph::are_adjacent(pseudo.out2$mst, "10", "4"))
 ```
 
 ## Session Info {-}
