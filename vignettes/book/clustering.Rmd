@@ -240,11 +240,11 @@ Larger modularity values indicate that there most edges occur within clusters, s
 
 The standard approach is to report a single modularity value for a clustering on a given graph.
 This is useful for comparing different clusterings on the same graph - and indeed, some community detection algorithms are designed with the aim of maximizing the modularity - but it is less helpful for interpreting a given clustering.
-Rather, we use the `clusterModularity()` function with `as.ratio=TRUE`, which returns the ratio of the observed to expected sum of weights between each pair of clusters.
+Rather, we use the `pairwiseModularity()` function from `r Biocpkg("bluster")` with `as.ratio=TRUE`, which returns the ratio of the observed to expected sum of weights between each pair of clusters.
 We use the ratio instead of the difference as the former is less dependent on the number of cells in each cluster.
 
 ```{r}
-ratio <- clusterModularity(g, clust, as.ratio=TRUE)
+ratio <- pairwiseModularity(g, clust, as.ratio=TRUE)
 dim(ratio)
 ```
 
