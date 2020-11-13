@@ -146,7 +146,9 @@ table(colLabels(altExp(sce.pbmc)))
 ```
 
 ```{r unref-clustmod-pbmc-adt, fig.cap="Heatmap of the pairwise cluster modularity scores in the PBMC dataset, computed based on the shared nearest neighbor graph derived from the ADT expression values."}
-mod <- clusterModularity(g.adt, clust.adt, as.ratio=TRUE)
+library(bluster)
+mod <- pairwiseModularity(g.adt, clust.adt, as.ratio=TRUE)
+
 library(pheatmap)
 pheatmap::pheatmap(log10(mod + 10), cluster_row=FALSE, cluster_col=FALSE,
     color=colorRampPalette(c("white", "blue"))(101))
