@@ -34,7 +34,7 @@ jobs:
           git commit -m "Incorporate latest changes from book." || true
           git push
       - name: Setting up the private key
-        uses: webfactory/ssh-agent@v0.4.0
+        uses: webfactory/ssh-agent@v0.4.1
         with:
           ssh-private-key: ${{ secrets.BIOC_PRIVATE_KEY }}
       - name: Pushing to Bioconductor
