@@ -193,11 +193,11 @@ We visualize the top markers for a randomly chosen cluster using a "dot plot" in
 The presence of upregulated genes like _LYZ_, _S100A8_ and _VCAN_ is consistent with a monocyte identity for this cluster.
 
 ```{r, echo=FALSE}
-cluster.choice <- "2"
+cluster.choice <- "4"
 ```
 
 ```{r unref-hca-bone-dotplot, fig.cap=sprintf("Heatmap of log~2~-fold changes for the top marker genes (rows) of cluster %s compared to all other clusters (columns).", cluster.choice)}
-top.markers <- markers.bone[["2"]]
+top.markers <- markers.bone[["4"]]
 best <- top.markers[top.markers$Top <= 10,]
 lfcs <- getMarkerEffects(best)
 
@@ -219,7 +219,7 @@ This is faster than the per-cell approaches described in Chapter \@ref(cell-type
 Nonetheless, it is often sufficient for a quick assignment of cluster identity, and indeed, cluster `r cluster.choice` is also identified as consisting of monocytes from this analysis.
 
 ```{r cell-type-classification}
-se.aggregated <- sumCountsAcrossCells(sce.bone, id=colLabels(sce.bone))
+se.aggregated <- sumCountsAcrossCells(sce.bone, id=colLabels(sce.bone), BPPARAM=bpp)
 
 library(celldex)
 hpc <- HumanPrimaryCellAtlasData()
@@ -232,7 +232,7 @@ anno.single
 
 ```{r, echo=FALSE}
 # Checking that our statement above is correct. 
-stopifnot(anno.single[cluster.choice,]$labels!="monocyte")
+stopifnot(anno.single[cluster.choice,]$labels=="Monocyte")
 ```
 
 <!-- ```{r saveRDS, include=FALSE} -->
