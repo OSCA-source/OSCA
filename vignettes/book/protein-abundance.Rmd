@@ -319,6 +319,8 @@ sizeFactors(altExp(sce)) <- sf.amb
 ```
 
 Regardless of which size factors are chosen, running `logNormCounts()` will then perform scaling normalization and log-transformation for both the endogenous transcripts and the ADTs using their respective size factors.
+Alternatively, we could run `logNormCounts()` directly on `altExp(sce)` if we only wanted to compute normalized log-abundances for the ADT data 
+(though in this case, we want to normalize the RNA data as we will be using it later in this chapter).
 
 ```{r}
 sce <- logNormCounts(sce, use.altexps=TRUE)
@@ -328,17 +330,48 @@ assayNames(sce)
 assayNames(altExp(sce))
 ```
 
-## Clustering and interpretation
+## Comments on downstream analyses
+
+### Feature selection
 
 Unlike transcript-based counts, feature selection is largely unnecessary for analyzing ADT data.
 This is because feature selection has already occurred during experimental design where the manual choice of target proteins means that all ADTs correspond to interesting features by definition.
-From a practical perspective, the ADT count matrix is already small so there is no need for data compaction from using HVGs or PCs.
-Moreover, each ADT is often chosen to capture some orthogonal biological signal, so there is not much extraneous noise in higher dimensions that can be readily removed.
-This suggests we should directly apply downstream procedures like clustering and visualization on the log-normalized abundance matrix for the ADTs (Figure \@ref(fig:tsne-tags)).
+In this particular dataset, we only have `r nrow(altExp(sce))` features so there is little scope for further filtering.
+Even larger datasets will only have 100-200 features - small numbers compared to our previous selections of 1000-5000 HVGs in Chapter \@ref(feature-selection).
+
+That said, larger datasets may benefit from a PCA step to compact the data from >100 ADTs to 10-20 PCs.
+This can be easily achieved by running `runPCA()` without passing in a vector of HVGs, as demonstrated below with another CITE-seq dataset from @kotliarov2020broad.
+
+```{r}
+library(scRNAseq)
+sce.kotliarov <- KotliarovPBMCData()
+adt.kotliarov <- altExp(sce.kotliarov)
+adt.kotliarov
+
+# QC.
+controls <- grep("isotype", rownames(adt.kotliarov), ignore.case=TRUE)
+stats.kotliarov <- cleanTagCounts(counts(adt.kotliarov), controls=controls)
+adt.kotliarov <- adt.kotliarov[,!stats.kotliarov$discard]
+summary(stats.kotliarov$discard)
+
+# Normalization.
+ambient <- inferAmbience(counts(adt.kotliarov))
+sizeFactors(adt.kotliarov) <- medianSizeFactors(adt.kotliarov, ref=ambient)
+adt.kotliarov <- logNormCounts(adt.kotliarov)
+
+# PCA.
+adt.kotliarov <- runPCA(adt.kotliarov, ncomponents=25)
+reducedDimNames(adt.kotliarov)
+```
+
+### Clustering and interpretation
+
+We can apply downstream procedures like clustering and visualization on the log-normalized abundance matrix for the ADTs (Figure \@ref(fig:tsne-tags)).
+Alternatively, if we had generated a matrix of PCs, we could use that as well.
 
 ```{r tsne-tags, fig.cap="$t$-SNE plot generated from the log-normalized abundance of each ADT in the PBMC dataset. Each point is a cell and is labelled according to its assigned cluster."}
 # Set d=NA so that the function does not perform PCA.
-g.adt <- buildSNNGraph(altExp(sce), d=NA) 
+g.adt <- buildSNNGraph(altExp(sce), d=NA)
 clusters.adt <- igraph::cluster_walktrap(g.adt)$membership
 
 # Generating a t-SNE plot.
