@@ -1,7 +1,7 @@
 Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 1.1.8
-Date: 2020-12-07
+Version: 1.1.9
+Date: 2020-12-25
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 
         person('Aaron', 'Lun', role = c('aut', 'cre'), email="infinite.monkeys.with.keyboards@gmail.com"), 
@@ -28,7 +28,6 @@ Suggests: AnnotationHub,
     cluster,
     clustree,
     corral,
-    DelayedMatrixStats,
     dendextend,
     DropletTestFiles,
     DropletUtils,
@@ -47,6 +46,7 @@ Suggests: AnnotationHub,
     limma,
     MouseGastrulationData,
     msigdbr,
+    mumosa,
     org.Hs.eg.db,
     org.Mm.eg.db,
     PCAtools,

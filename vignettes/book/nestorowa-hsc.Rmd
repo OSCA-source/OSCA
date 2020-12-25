@@ -38,7 +38,7 @@ unfiltered <- sce.nest
 
 For some reason, no mitochondrial transcripts are available, so we will perform quality control using the spike-in proportions only.
 
-```{r quality-control-grun}
+```{r quality-control}
 library(scater)
 stats <- perCellQCMetrics(sce.nest)
 qc <- quickPerCellQC(stats, percent_subsets="altexps_ERCC_percent")
