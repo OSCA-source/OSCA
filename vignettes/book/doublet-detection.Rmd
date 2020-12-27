@@ -117,8 +117,10 @@ The method is also somewhat biased towards clusters with fewer cells, where the 
 
 ## Doublet detection by simulation {#doublet-simulation}
 
+### Computing doublet densities
+
 The other doublet detection strategy involves _in silico_ simulation of doublets from the single-cell expression profiles [@dahlin2018single].
-This is performed using the `computeDoubletDensity()` function from `r Biocpkg("scran")`, which will:
+This is performed using the `computeDoubletDensity()` function from `r Biocpkg("scDblFinder")`, which will:
 
 1. Simulate thousands of doublets by adding together two randomly chosen single-cell profiles.
 2. For each original cell, compute the density of simulated doublets in the surrounding neighborhood.
@@ -150,10 +152,19 @@ sce.mam$DoubletScore <- dbl.dens
 plotTSNE(sce.mam, colour_by="DoubletScore")
 ```
 
+We can explicitly convert this into doublet calls by identifying large outliers for the score within each sample [@pijuansala2019single].
+Here, we only have one sample so the call below is fairly simple, but it can also support multiple samples if the input `data.frame` has a `sample` column.
+
+```{r}
+dbl.calls <- doubletThresholding(data.frame(score=dbl.dens),
+    method="griffiths", returnType="call")
+summary(dbl.calls)
+```
+
 From the clustering information, we see that the affected cells belong to the same cluster that was identified using `findDoubletClusters()` (Figure \@ref(fig:densclust)), which is reassuring.
 
-```{r densclust, fig.cap="Distribution of doublet scores for each cluster in the mammary gland data set. Each point is a cell."}
-plotColData(sce.mam, x="label", y="DoubletScore", colour_by="label")
+```{r densclust, fig.cap="Distribution of doublet scores for each cluster in the mammary gland data set. Each point is a cell and is colored according to whether it was called as a doublet."}
+plotColData(sce.mam, x="label", y="DoubletScore", colour_by=I(dbl.calls))
 ```
 
 The advantage of `computeDoubletDensity()` is that it does not depend on clusters, reducing the sensitivity of the results to clustering quality.
@@ -162,20 +173,50 @@ In particular, `computeDoubletDensity()` treats the library size of each cell as
 If this is not true, the simulation will not combine expression profiles from different cells in the correct proportions.
 This means that the simulated doublets will be systematically shifted away from the real doublets, resulting in doublet scores that are too low.
 
+(As an aside, the issue of unknown combining proportions can be solved if spike-in information is available, e.g., in plate-based protocols.
+This will provide an accurate estimate of the total RNA content of each cell.
+To this end, spike-in-based size factors from Section \@ref(spike-norm) can be supplied to the `computeDoubletDensity()` function via the `size.factors.content=` argument.
+This will use the spike-in size factors to scale the contribution of each cell to a doublet library.)
+
+### Doublet classification  
+
+The `scDblFinder()` function [@germain2020pipecomp] implements a related approach based on doublet simulation.
+For each observed cell, an initial score is computed based on the fraction of simulated doublets in its neighborhood.
+A threshold is chosen that best distinguishes between the real and simulated cells, allowing us to obtain putative doublet calls among the real cells.
+The threshold and scores are then iteratively refined by training a classifier on the putative calls with a variety of metrics to characterize the doublet neighborhood.
+These metrics include the low-dimensional embeddings in PC space, the fraction of doublets among the $k$ nearest neighbors for a variety of $k$,
+the distance to the closest real cell, the expected within-cluster doublet formation rate, the observed number of cells in each cluster, and so on.
+The classifier distills all of these metrics into a single score based on their learnt importance (Figure \@ref(fig:scdblfinder-tsne)).
+
+```{r scdblfinder-tsne, fig.cap="t-SNE plot of the mammary gland data set where each point is a cell coloured according to its `scDblFinder()` score."}
+set.seed(10010101)
+sce.mam.dbl <- scDblFinder(sce.mam, clusters=colLabels(sce.mam))
+plotTSNE(sce.mam.dbl, colour_by="scDblFinder.score")
+```
+
+We can also extract explicit doublet calls for each cell based on the final threshold from the iterative process. 
+
+```{r}
+table(sce.mam.dbl$scDblFinder.class)
+```
+
+Compared to `computeDoubletDensity()`, `scDblFinder()` provides a more sophisticated approach that makes greater use of the information in the simulated doublets.
+This can improve performance of doublet calling in difficult scenarios, e.g., if many within-cluster doublets are present.
+However, this strategy has a slightly stronger reliance on clustering - and thus sensitivity to the vagaries of cluster formation - 
+as this is used to compute some of the metrics mentioned above.
+In addition, the correctness of the simulation process remains a concern, though this is arguably the case for all algorithms of this class. 
+
+### Further comments
+
 Simply removing cells with high doublet scores will not be sufficient to eliminate real doublets from the data set.
 In some cases, only a subset of the cells in the putative doublet cluster actually have high scores, and removing these would still leave enough cells in that cluster to mislead downstream analyses.
 In fact, even defining a threshold on the doublet score is difficult as the interpretation of the score is relative.
 There is no general definition for a fixed threshold above which libraries are to be considered doublets.
 
-We recommend interpreting the `computeDoubletDensity()` scores in the context of cluster annotation.
+We recommend interpreting the these scores in the context of cluster annotation.
 All cells from a cluster with a large average doublet score should be considered suspect, and close neighbors of problematic clusters should also be treated with caution.
 In contrast, a cluster containing a small proportion of high-scoring cells is probably safe provided that any interesting results are not being driven by those cells (e.g., checking that DE in an interesting gene is not driven solely by cells with high doublet scores).
 While clustering is still required, this approach is more robust than `findDoubletClusters()` to the quality of the clustering as the scores are computed on a per-cell basis.
-
-(As an aside, the issue of unknown combining proportions can be solved completely if spike-in information is available, e.g., in plate-based protocols.
-This will provide an accurate estimate of the total RNA content of each cell.
-To this end, spike-in-based size factors from Section \@ref(spike-norm) can be supplied to the `computeDoubletDensity()` function via the `size.factors.content=` argument.
-This will use the spike-in size factors to scale the contribution of each cell to a doublet library.)
 
 ## Doublet detection in multiplexed experiments
 

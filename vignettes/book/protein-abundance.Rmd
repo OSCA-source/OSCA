@@ -106,7 +106,7 @@ We identify such libraries that have no estimated contribution from the ambient 
 
 ```{r}
 controls <- grep("^Ig", rownames(altExp(sce))) # see below for details.
-qc.stats <- cleanTagCounts(counts(altExp(sce)), controls=controls)
+qc.stats <- cleanTagCounts(altExp(sce), controls=controls)
 summary(qc.stats$zero.ambient) # libraries removed with no ambient contamination
 ```
 
@@ -132,14 +132,13 @@ Random examples from some other datasets.
 ```{r, eval=FALSE}
 library(scRNAseq)
 sce.k <- KotliarovPBMCData(mode='adt')
-stats.k <- cleanTagCounts(as.matrix(counts(sce.k)), 
-    controls=grep("isotype", rownames(sce.k), ignore.case=TRUE))
+stats.k <- cleanTagCounts(sce.k, controls=grep("isotype", rownames(sce.k), ignore.case=TRUE))
 hist(log10(stats.k$sum.controls + 1), col='grey', breaks=50,
     main="", xlab="Log-total count for controls per cell")
 abline(v=log10(attr(stats.k$low.controls, "threshold")["higher"] + 1), col="red")
 
 sce.s <- StoeckiusHashingData(mode=c('adt1', 'adt2'))
-stats.s <- cleanTagCounts(as.matrix(counts(sce.s)), controls=rownames(sce.s))
+stats.s <- cleanTagCounts(sce.s, controls=rownames(sce.s))
 plot(colSums(counts(altExp(sce.s))), stats.s$sum.controls, log="xy")
 ```
 -->
@@ -183,7 +182,7 @@ allowing us to remove high outliers that presumably represent droplets contamina
 However, this strategy is not appropriate for small antibody panels where a majority of markers may be expressed.
 
 ```{r}
-qc.stats.amb <- cleanTagCounts(counts(altExp(sce)))
+qc.stats.amb <- cleanTagCounts(altExp(sce))
 summary(qc.stats.amb$high.ambient)
 ```
 
@@ -193,7 +192,7 @@ In this manner, we eliminate marker combinations that are nonsensical based on p
 Needless to say, this is not a comprehensive approach but at least the worst offenders can be filtered out.
 
 ```{r}
-qc.stats.amb <- cleanTagCounts(counts(altExp(sce)), exclusive=c("CD3", "CD19"))
+qc.stats.amb <- cleanTagCounts(altExp(sce), exclusive=c("CD3", "CD19"))
 summary(qc.stats.amb$high.ambient)
 ```
 
@@ -242,7 +241,7 @@ We use all cells in the lower mode to compute the baseline abundance for that AD
 We can also use other baseline profiles here - one alternative would be the ambient solution computed from empty droplets (Section \@ref(qc-droplets)).
 
 ```{r pbmc-adt-ambient-profile, fig.cap="Distribution of (log-)counts for each ADT in the PBMC dataset, with the inferred ambient abundance marked by the black dot."}
-baseline <- ambientProfileBimodal(counts(altExp(sce)))
+baseline <- ambientProfileBimodal(altExp(sce))
 head(baseline)
 
 library(scater)
@@ -266,23 +265,19 @@ In one subpopulation, the size factors are consistently larger than the ADT libr
 This is consistent with the presence of composition biases due to differential abundance of the targeted proteins between subpopulations.
 Here, composition biases would introduce a spurious 2-fold change in normalized ADT abundance if the library size factors were used.
 
-```{r comp-bias-norm, fig.cap="DESeq-like size factors for each cell in the PBMC dataset, compared to ADT library size factors. Each point is a cell and is colored according to the cluster identity defined from normalized ADT data. The dashed line represents equality."}
-# Coloring by cluster to highlight the composition biases.
-# We set k=20 to get fewer, broader clusters for a clearer picture.
+```{r comp-bias-norm, fig.width=12, fig.height=6, fig.cap="Distribution of the log-ratio of the median-based size factor to the corresponding ADT library size factor for each cell in the PBMC dataset, stratified according to the cluster identity defined from normalized ADT data."}
+# We're getting a little ahead of ourselves here, in order to define some
+# clusters to make this figure; see the next section for more details.
 library(scran)
-tagdata <- logNormCounts(altExp(sce)) # library size factors by default.
-g <- buildSNNGraph(tagdata, k=20, d=NA) # no need for PCA, see below.
-clusters <- igraph::cluster_walktrap(g)$membership
+tagdata <- logNormCounts(altExp(sce)) 
+clusters <- clusterCells(tagdata, assay.type="logcounts") 
 
-plot(sf.lib, sf.amb, log="xy", col=clusters, 
-    xlab="Library size factors (tag)",
-    ylab="DESeq-like size factors (tag)")
-abline(0, 1, col="grey", lty=2)
+by.clust <- split(log2(sf.amb/sf.lib), clusters)
+boxplot(by.clust, xlab="Cluster", ylab="Log-ratio (median-based/library size factors)")
 ```
 
 ```{r, echo=FALSE, results="hide"}
 # Checking my trash talk.
-by.clust <- split(log2(sf.lib/sf.amb), clusters)
 med.clust <- vapply(by.clust, median, 0)
 stopifnot(diff(range(med.clust)) > 1)
 ```
@@ -293,13 +288,13 @@ If control ADTs are available, we could make the assumption that they should not
 Any difference thus represents some bias that should be normalized by defining control-based size factors from the sum of counts over all control ADTs, analogous to spike-in normalization (Section \@ref(spike-norm)), 
 We demonstrate this approach below by computing size factors from the IgG controls (Figure \@ref(fig:control-bias-norm)).
 
-```{r control-bias-norm, fig.cap="IgG control-derived size factors for each cell in the PBMC dataset, compared to the DESeq-like size factors. The dashed line represents equality."}
+```{r control-bias-norm, fig.cap="IgG control-derived size factors for each cell in the PBMC dataset, compared to the median-based size factors. The dashed line represents equality."}
 controls <- grep("^Ig", rownames(altExp(sce)))
 sf.control <- librarySizeFactors(altExp(sce), subset_row=controls) 
 summary(sf.control)
 
 plot(sf.amb, sf.control, log="xy", 
-    xlab="DESeq-like size factors (tag)",
+    xlab="median-based size factors (tag)",
     ylab="Control size factors (tag)")
 abline(0, 1, col="grey", lty=2)
 ```
@@ -350,12 +345,12 @@ adt.kotliarov
 
 # QC.
 controls <- grep("isotype", rownames(adt.kotliarov), ignore.case=TRUE)
-stats.kotliarov <- cleanTagCounts(counts(adt.kotliarov), controls=controls)
+stats.kotliarov <- cleanTagCounts(adt.kotliarov, controls=controls)
 adt.kotliarov <- adt.kotliarov[,!stats.kotliarov$discard]
 summary(stats.kotliarov$discard)
 
 # Normalization.
-ambient <- inferAmbience(counts(adt.kotliarov))
+ambient <- ambientProfileBimodal(adt.kotliarov)
 sizeFactors(adt.kotliarov) <- medianSizeFactors(adt.kotliarov, ref=ambient)
 adt.kotliarov <- logNormCounts(adt.kotliarov)
 
@@ -370,9 +365,7 @@ We can apply downstream procedures like clustering and visualization on the log-
 Alternatively, if we had generated a matrix of PCs, we could use that as well.
 
 ```{r tsne-tags, fig.cap="$t$-SNE plot generated from the log-normalized abundance of each ADT in the PBMC dataset. Each point is a cell and is labelled according to its assigned cluster."}
-# Set d=NA so that the function does not perform PCA.
-g.adt <- buildSNNGraph(altExp(sce), d=NA)
-clusters.adt <- igraph::cluster_walktrap(g.adt)$membership
+clusters.adt <- clusterCells(altExp(sce), assay.type="logcounts")
 
 # Generating a t-SNE plot.
 library(scater)
@@ -416,8 +409,7 @@ all.sce <- quickSubCluster(sce, clusters.adt,
         x <- runPCA(x, subset_row=top, ncomponents=25)
     },
     clusterFUN=function(x) {
-        g.trans <- buildSNNGraph(x, use.dimred="PCA")
-        igraph::cluster_walktrap(g.trans)$membership
+        clusterCells(x, use.dimred="PCA")
     }
 )
 
