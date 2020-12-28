@@ -181,7 +181,7 @@ This will use the spike-in size factors to scale the contribution of each cell t
 ### Doublet classification  
 
 The `scDblFinder()` function [@germain2020pipecomp] implements a related approach based on doublet simulation.
-For each observed cell, an initial score is computed based on the fraction of simulated doublets in its neighborhood.
+For each observed cell, an initial score is computed by combining the fraction of simulated doublets in its neighborhood with another score based on co-expression of mutually exclusive gene pairs [@bais2020scds].
 A threshold is chosen that best distinguishes between the real and simulated cells, allowing us to obtain putative doublet calls among the real cells.
 The threshold and scores are then iteratively refined by training a classifier on the putative calls with a variety of metrics to characterize the doublet neighborhood.
 These metrics include the low-dimensional embeddings in PC space, the fraction of doublets among the $k$ nearest neighbors for a variety of $k$,
@@ -213,10 +213,11 @@ In some cases, only a subset of the cells in the putative doublet cluster actual
 In fact, even defining a threshold on the doublet score is difficult as the interpretation of the score is relative.
 There is no general definition for a fixed threshold above which libraries are to be considered doublets.
 
-We recommend interpreting the these scores in the context of cluster annotation.
-All cells from a cluster with a large average doublet score should be considered suspect, and close neighbors of problematic clusters should also be treated with caution.
-In contrast, a cluster containing a small proportion of high-scoring cells is probably safe provided that any interesting results are not being driven by those cells (e.g., checking that DE in an interesting gene is not driven solely by cells with high doublet scores).
-While clustering is still required, this approach is more robust than `findDoubletClusters()` to the quality of the clustering as the scores are computed on a per-cell basis.
+We recommend interpreting these scores in the context of cluster annotation.
+All cells from a cluster with a large average doublet score should be considered suspect, and close neighbors of problematic clusters should be treated with caution.
+A cluster containing only a small proportion of high-scoring cells is safer, though this prognosis comes with the caveat that true doublets often lie immediately adjacent to their source populations and end up being assigned to the same cluster.
+It is worth confirming that any interesting results of downstream analyses are not being driven by those cells, e.g., by checking that DE in an interesting gene is not driven solely by cells with high doublet scores.
+While clustering is still required for interpretation, the simulation-based strategy is more robust than `findDoubletClusters()` to the quality of the clustering as the scores are computed on a per-cell basis.
 
 ## Doublet detection in multiplexed experiments
 
