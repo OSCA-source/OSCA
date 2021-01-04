@@ -1,0 +1,243 @@
+# Getting scRNA-seq datasets
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+## Overview
+
+Sequencing data from single-cell RNA-seq experiments must be converted into a matrix of expression values.
+This is usually a count matrix containing the number of reads mapped to each gene (row) in each cell (column).
+Alternatively, the counts may be that of the number of unique molecular identifiers (UMIs);
+these are interpreted in the same manner as read counts but are less affected by PCR artifacts during library preparation [@islam2014quantitative].
+Once this quantification is complete, we can proceed with our downstream statistical analyses in R.
+
+Constructing a count matrix from raw scRNA-seq data requires some thought as the term "single-cell RNA-seq" encompasses a variety of different experimental protocols.
+This includes droplet-based protocols like 10X Genomics, inDrop and Drop-seq;
+plate-based protocols with UMIs like CEL-seq(2) and MARS-seq;
+plate-based protocols with reads (mostly Smart-seq2);
+and others like sciRNA-seq, to name a few.
+Each approach requires a different processing pipeline to deal with cell demultiplexing and UMI deduplication (if applicable).
+This chapter will briefly describe some of the methods used to generate a count matrix and read it into R.
+
+## Some comments on experimental design
+
+Each scRNA-seq protocol has its own advantages and weaknesses that are discussed extensively elsewhere [@mereu2019benchmarking;@ziegenhain2017comparative].
+In practical terms, droplet-based technologies are the current _de facto_ standard due to their throughput and low cost per cell.
+Plate-based methods can capture other phenotypic information (e.g., morphology) and are more amenable to customization.
+Read-based methods provide whole-transcript coverage, which is useful in some applications (e.g., splicing, exome mutations); otherwise, UMI-based methods are more popular as they mitigate the effects of PCR amplification noise.
+The choice of method is left to the reader's circumstances - we will simply note that most of the downstream analysis is agnostic to the exact technology being used. 
+
+Another question is how many cells should be captured, and to what depth they should be sequenced.
+The best trade-off between these two factors is an active topic of research [@zhang2020determining;@svensson2019quantifying], though ultimately, much depends on the scientific aims of the experiment.
+If we are aiming to discover rare cell subpopulations, we would need more cells, whereas if we are aiming to quantify subtle differences, we would need more sequencing depth.
+As of time of writing, an informal survey of the literature suggests that typical droplet-based experiments would capture anywhere from 10,000 to 100,000 cells, sequenced at anywhere from 1,000 to 10,000 UMIs per cell (usually in inverse proportion to the number of cells).
+Droplet-based methods also have a trade-off between throughput and doublet rate that affects the true efficiency of sequencing.
+
+For studies involving multiple samples or conditions, the design considerations are the same as those for bulk RNA-seq experiments.
+There should be multiple biological replicates for each condition and conditions should not be confounded with batch.
+Note that individual cells are not replicates; rather, we are referring to samples derived from replicate donors or cultures.
+In fact, this adds another dimension into the resourcing equation - should we obtain more cells per sample at the cost of being able to sequence fewer samples?
+The best answer depends on the sizes of the subpopulations involved, the ease with which they are distinguished from others, and their variability across different samples and conditions.
+Such factors are rarely known ahead of time, so an informed decision on the design will often benefit from pilot experiments. 
+
+## Creating a count matrix
+
+As mentioned above, the exact procedure for quantifying expression depends on the technology involved:
+
+* For 10X Genomics data, the `Cellranger` software suite [@zheng2017massively] provides a custom pipeline to obtain a count matrix.
+This uses _STAR_ to align reads to the reference genome and then counts the number of unique UMIs mapped to each gene.
+* Alternatively, pseudo-alignment methods such as `alevin` [@srivastava2019alevin] can be used to obtain a count matrix from the same data.
+This avoids the need for explicit alignment, which reduces the compute time and memory usage.
+* For other highly multiplexed protocols, the `r Biocpkg("scPipe")` package provides a more general pipeline for processing scRNA-seq data.
+This uses the `r Biocpkg("Rsubread")` aligner to align reads and then counts reads or UMIs per gene.
+* For CEL-seq or CEL-seq2 data, the `r Biocpkg("scruff")` package provides a dedicated pipeline for quantification.
+* For read-based protocols, we can generally re-use the same pipelines for processing bulk RNA-seq data.
+* For any data involving spike-in transcripts, the spike-in sequences should be included as part of the reference genome during alignment and quantification.
+
+In all cases, the identity of the genes in the count matrix should be defined with standard identifiers from Ensembl or Entrez.
+These provide an unambiguous mapping between each row of the matrix and the corresponding gene.
+In contrast, a single gene symbol may be used by multiple loci, or the mapping between symbols and genes may change over time, e.g., if the gene is renamed.
+This makes it difficult to re-use the count matrix as we cannot be confident in the meaning of the symbols.
+(Of course, identifiers can be easily converted to gene symbols later on in the analysis.
+This is the recommended approach as it allows us to document how the conversion was performed and to backtrack to the stable identifiers if the symbols are ambiguous.)
+
+Depending on the process involved, there may be additional points of concern: 
+
+- Some feature-counting tools (e.g., `HTSeq`) will report mapping statistics in the count matrix, such as the number of unaligned or unassigned reads.
+While these values can be useful for quality control, they would be misleading if treated as gene expression values.
+Thus, they should be removed (or at least moved somewhere else) prior to further analyses.
+- The most common spike-ins are those developed by the External RNA Controls Consortium (ERCC), which have names along the lines of ERCC-00002.
+For human data, one should be careful to distinguish these rows from an actual ERCC gene family that has gene symbols like _ERCC1_.
+This issue can be avoided altogether by using standard identifiers that are no susceptible to these naming conflicts.
+
+## Reading counts into R
+
+### From tabular formats
+
+The next step is to import the count matrix into R.
+Again, this depends on the output format of the aforementioned processing pipeline.
+In the simplest case, the pipeline will produce a matrix in tabular format, which can be read in with standard methods like `read.delim()`.
+We demonstrate below using a pancreas scRNA-seq dataset from @muraro2016singlecell ([GSE85241](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE85241)):
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r}
+library(BiocFileCache)
+bfc <- BiocFileCache("raw_data", ask=FALSE)
+url <- file.path("ftp://ftp.ncbi.nlm.nih.gov/geo/series",
+    "GSE85nnn/GSE85241/suppl",
+    "GSE85241%5Fcellsystems%5Fdataset%5F4donors%5Fupdated%2Ecsv%2Egz")
+muraro.fname <- bfcrpath(bfc, url)
+local.name <- URLdecode(basename(url))
+unlink(local.name)
+file.symlink(muraro.fname, local.name)
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+mat <- as.matrix(read.delim("GSE85241_cellsystems_dataset_4donors_updated.csv.gz"))
+dim(mat) # number of rows, number of columns
+```
+
+In practice, a more efficient approach is to read in the table in sparse format using the `readSparseCounts()` function from the `r Biocpkg("scuttle")` package.
+This only stores the non-zero values and avoids spending memory on the majority of zeros in lowly-sequenced scRNA-seq experiments.
+
+```{r}
+library(scuttle)
+sparse.mat <- readSparseCounts("GSE85241_cellsystems_dataset_4donors_updated.csv.gz")
+dim(sparse.mat)
+
+# We can see that it uses less memory compared to 'mat'.
+object.size(sparse.mat)
+object.size(mat)
+```
+
+On occasion, we may encounter count data stored in Excel files.
+These can be extracted into a matrix using functions from the `r CRANpkg("readxl")` package, 
+as demonstrated for a dataset from @wilson2015combined ([GSE61533](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE61533)):
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r}
+bfc <- BiocFileCache("raw_data", ask=FALSE)
+wilson.fname <- bfcrpath(bfc, file.path("ftp://ftp.ncbi.nlm.nih.gov/geo/series",
+    "GSE61nnn/GSE61533/suppl/GSE61533_HTSEQ_count_results.xls.gz"))
+
+library(R.utils)
+wilson.name2 <- "GSE61533_HTSEQ_count_results.xls"
+gunzip(wilson.fname, destname=wilson.name2, remove=FALSE, overwrite=TRUE)
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+library(readxl)
+all.counts <- read_excel("GSE61533_HTSEQ_count_results.xls")
+gene.names <- all.counts$ID
+all.counts <- as.matrix(all.counts[,-1])
+rownames(all.counts) <- gene.names
+dim(all.counts)
+```
+
+### From _Cellranger_ output
+
+For 10X Genomics data, the _Cellranger_ software suite will produce an output directory containing counts and feature/barcode annotations.
+We can read this into R by supplying the directory path to `read10xCounts()` from the `r Biocpkg("DropletUtils")` package,
+as demonstrated below using a [4000 peripheral blood mononuclear cell dataset](https://support.10xgenomics.com/single-cell-gene-expression/datasets/2.1.0/pbmc4k).
+Note that the function produces a `SingleCellExperiment` object containing the matrix, which we will discuss in more detail in the next chapter.
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r}
+library(DropletTestFiles)
+cached <- getTestFile("tenx-2.1.0-pbmc4k/1.0.0/filtered.tar.gz")
+fpath <- "tenx-2.1.0-pbmc4k"
+untar(cached, exdir=fpath)
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+library(DropletUtils)
+sce <- read10xCounts("tenx-2.1.0-pbmc4k/filtered_gene_bc_matrices/GRCh38")
+sce
+```
+
+We can also read in multiple count matrices by passing multiple directory paths to `read10xCounts()`.
+Provided that all datasets have the same gene annotation, the function will be able to combine them into a single object.
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r, results='hide'}
+# Making a copy and pretending it's a different sample,
+# for demonstration purposes.
+# TODO: actually get a different sample.
+target <- paste0(fpath, '-2')
+unlink(target)
+file.symlink(fpath, target)
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+dirA <- "tenx-2.1.0-pbmc4k/filtered_gene_bc_matrices/GRCh38"
+dirB <- "tenx-2.1.0-pbmc4k-2/filtered_gene_bc_matrices/GRCh38"
+sce <- read10xCounts(c(dirA, dirB))
+sce
+```
+
+It is worth noting that the _Cellranger_ software suite is not the only approach to processing 10X Genomics data.
+For example, `alevin` output can be read into R using the `r Biocpkg("tximeta")` package,
+while `kallisto`-`bustools` output can be read using the `r Biocpkg("BUSpaRse")` package.
+
+### From HDF5-based formats
+
+A family of scRNA-seq storage formats is based around Hierarchical Data Format version 5 (HDF5).
+These formats offer the ability to store both the expression values and associated annotations on the genes and cells to be stored in the same file.
+One flavor of this approach is the H5AD format, which can be read into R as a `SingleCellExperiment` using the `r Biocpkg("zellkonverter")` package.
+We demonstrate below with an example dataset that is built into the package:
+
+```{r}
+library(zellkonverter)
+demo <- system.file("extdata", "krumsiek11.h5ad", package = "zellkonverter")
+sce <- readH5AD(demo)
+sce
+```
+
+Another flavor is the Loom file format, which we can read into R with the `r Biocpkg("LoomExperiment")` package.
+In this case, the procedure creates a `SingleCellLoomExperiment`, which is effectively a plug-and-play equivalent to the `SingleCellExperiment`.
+
+```{r}
+library(LoomExperiment)
+demo <- system.file("extdata", "L1_DRG_20_example.loom", package = "LoomExperiment")
+scle <- import(demo, type="SingleCellLoomExperiment")
+scle
+```
+
+The HDF5-based formats have an additional advantage in that Bioconductor-based analyses can be performed without reading all of the data into R.
+This allows us to analyze very large datasets in the presence of limited computer memory, a functionality that we will discuss in more detail in Chapter \@ref(dealing-with-big-data).
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

@@ -9,12 +9,12 @@ cover-image: "images/cover.png"
 output_dir: "docs"
 rmd_files: ["index.Rmd",
     # Part 1, intro:
-    "introduction.Rmd",
-    "learning-r-and-bioconductor.Rmd",
-    "beyond-r-basics.Rmd",
-    "data-infrastructure.Rmd",
+    "installation.Rmd",
+    "learning-r.Rmd",
+    "getting-datasets.Rmd",
+    "sce-class.Rmd",
+    "analysis-overview.Rmd",
     # Part 2, topics:
-    "overview.Rmd",
     "quality-control.Rmd",
     "normalization.Rmd",
     "feature-selection.Rmd",

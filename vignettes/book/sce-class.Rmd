@@ -1,0 +1,528 @@
+# The `SingleCellExperiment` class 
+
+```{r setup, echo=FALSE, results="asis"}
+library(rebook)
+chapterPreamble()
+```
+
+## Overview
+
+One of the main strengths of the Bioconductor project lies in the use of a common data infrastructure that powers interoperability across packages.
+Users should be able to analyze their data using functions from different Bioconductor packages without the need to convert between formats. 
+To this end, the `SingleCellExperiment` class (from the `r Biocpkg("SingleCellExperiment")` package) serves as the common currency for data exchange across 70+ single-cell-related Bioconductor packages.
+This class implements a data structure that stores all aspects of our single-cell data - gene-by-cell expression data, per-cell metadata and per-gene annotation (Figure \@ref(fig:sce-structure)) - and manipulate them in a synchronized manner.
+
+```{r sce-structure, fig.wide=TRUE, echo=FALSE, fig.cap="Overview of the structure of the `SingleCellExperiment` class. Each row of the assays corresponds to a row of the `rowData` (pink shading), while each column of the assays corresponds to a column of the `colData` and `reducedDims` (yellow shading)."}
+library(rebook)
+knitr::include_graphics(
+    file.path("https://raw.githubusercontent.com/Bioconductor/OSCABase/images/images",
+        "SingleCellExperiment.png")
+)
+```
+
+Each piece of (meta)data in the `SingleCellExperiment` is represented by a separate "slot".
+(This terminology comes from the [S4 class system](https://adv-r.hadley.nz/s4.html), but that's not important right now.)
+If we imagine the `SingleCellExperiment` object to be a cargo ship, the slots can be thought of as individual cargo boxes with different contents, e.g., certain slots expect numeric matrices whereas others may expect data frames.
+In the rest of this chapter, we will discuss the available slots, their expected formats, and how we can interact with them.
+More experienced readers may note the similarity with the `SummarizedExperiment` class, and if you are such a reader, you may wish to jump directly to the end of this chapter for the single-cell-specific aspects of this class.
+
+## Installing required packages
+
+The `r Biocpkg("SingleCellExperiment")` package is automatically installed when using any package that depends on the `SingleCellExperiment` class, but it can also be explicitly installed:
+
+```{r, eval=FALSE}
+BiocManager::install('SingleCellExperiment')
+```
+
+We then load the `r Biocpkg("SingleCellExperiment")` package into our R session.
+This avoids the need to prefix our function calls with `::`, especially for packages that are heavily used throughout a workflow.
+
+```{r message=FALSE}
+library(SingleCellExperiment)
+```
+
+For the demonstrations in this chapter, we will use some functions from a variety of other packages, installed as shown below.
+These functions will be accessed through the `<package>::<function>` convention as needed.
+
+```{r, eval=FALSE}
+BiocManager::install(c('scuttle', 'scran', 'scater', 'uwot', 'rtracklayer'))
+```
+
+## Storing primary experimental data 
+
+### Filling the `assays` slot
+
+To construct a rudimentary `SingleCellExperiment` object, we only need to fill the `assays` slot.
+This contains primary data such as a matrix of sequencing counts where rows correspond to features (genes) and columns correspond to samples (cells) (Figure \@ref(fig:sce-structure), blue box).
+To demonstrate, we will use a small scRNA-seq count matrix downloaded from the ArrayExpress servers [@lun2017assessing]:
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r}
+library(BiocFileCache)
+bfc <- BiocFileCache("raw_data", ask = FALSE)
+lun.zip <- bfcrpath(bfc, file.path("https://www.ebi.ac.uk/arrayexpress/files",
+    "E-MTAB-5522/E-MTAB-5522.processed.1.zip"))
+unzip(lun.zip, exdir=tempdir())
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+mat <- read.delim(file.path(tempdir(), "counts_Calero_20160113.tsv"),
+    header=TRUE, row.names=1, check.names=FALSE)
+
+# Only considering endogenous genes for now.
+spike.mat <- mat[grepl("^ERCC-", rownames(mat)),] 
+mat <- mat[grepl("^ENSMUSG", rownames(mat)),] 
+
+# Splitting off the gene length column.
+gene.length <- mat[,1]
+mat <- as.matrix(mat[,-1]) 
+
+dim(mat)
+```
+
+From this, we can now construct our first `SingleCellExperiment` object using the `SingleCellExperiment()` function.
+Note that we provide our data as a named list where each entry of the list is a matrix - in this case, named `"counts"`. 
+
+```{r}
+sce <- SingleCellExperiment(assays = list(counts = mat))
+```
+
+To inspect the object, we can simply type `sce` into the console to see some pertinent information.
+This will print an overview of the various slots available to us, which may or may not have any data.
+
+```{r}
+sce
+```
+
+To access the count data we just supplied, we can do any one of the following:
+
+* `assay(sce, "counts")` - this is the most general method, where we can supply the name of the assay as the second argument.
+* `counts(sce)` - this is a short-cut for the above, but *only* works for assays with the special name `"counts"`.
+
+```{r}
+mat2 <- counts(sce)
+```
+
+**NOTE:** For exported S4 classes, it is rarely a good idea to directly access the slots with the `@` oeprator.
+This is considered bad practice as the class developers are free to alter the internal structure of the class, at which point any code using `@` may no longer work.
+Rather, it is best to use the provided getter functions like `assay()` and `counts()` to extract data from the object.
+Similarly, setting slots should be done via the provided setter functions, which are discussed in the next section.
+
+### Adding more `assays`
+
+One of the strengths of the `assays` slot is that it can hold multiple representations of the primary data. 
+This is particularly useful for storing the raw count matrix as well as a normalized version of the data. 
+For example, the `logNormCounts()` function from `r Biocpkg("scuttle")` will compute a log-transformed normalized expression matrix and store it as another assay.
+
+```{r, message=FALSE}
+sce <- scuttle::logNormCounts(sce)
+sce
+```
+
+We overwrite our previous `sce` by reassigning the result of `logNormCounts()` back to `sce`.
+This is possible because these particular functions return a `SingleCellExperiment` object that contains the results in addition to original data.
+Indeed, viewing the object again, we see that this function added a new assay entry `"logcounts"`.
+
+```{r}
+sce
+```
+
+Similar to `"counts"`, the `"logcounts"` name can be conveniently accessed using `logcounts(sce)`.
+
+```{r}
+dim(logcounts(sce))
+```
+
+While `logNormCounts()` will automatically add assays to our `sce` object and return the modified object, other functions may return a matrix directly.
+In such cases, we need to manually insert the matrix into the `assays`, which we can do with the corresponding setter function.
+To illustrate, we can create a new assay where we add 100 to all the counts:
+
+```{r}
+counts_100 <- counts(sce) + 100
+assay(sce, "counts_100") <- counts_100 # assign a new entry to assays slot
+assays(sce) # new assay has now been added.
+```
+
+### Further comments
+
+To retrieve all the available assays within `sce`, we can use the `assays()` getter.
+By comparison, `assay()` only returns a single assay of interest.
+
+```{r}
+assays(sce)
+```
+
+The setter of the same name can be used to modify the set of available assays:
+
+```{r}
+# Only keeping the first two assays
+assays(sce) <- assays(sce)[1:2]
+sce
+```
+
+Alternatively, if we just want the names of the assays, we can get or set them with `assayNames()`:
+
+```{r}
+assayNames(sce)
+names(assays(sce)) # same result, but slightly less efficient.
+```
+
+## Handling metadata
+
+### On the columns
+
+To further annotate our `SingleCellExperiment` object, we can add metadata to describe the columns of our primary data, e.g., the samples or cells of our experiment. 
+This is stored in the `colData` slot, a `DataFrame` object where rows correspond to cells and columns correspond to metadata fields, e.g., batch of origin, treatment condition (Figure \@ref(fig:sce-structure), orange box).
+We demonstrate using some of the metadata accompanying the counts from @lun2017assessing.
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r}
+# Downloading the SDRF file containing the metadata.
+lun.sdrf <- bfcrpath(bfc, file.path("https://www.ebi.ac.uk/arrayexpress/files",
+    "E-MTAB-5522/E-MTAB-5522.sdrf.txt"))
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+coldata <- read.delim(lun.sdrf, check.names=FALSE)
+
+# Only keeping the cells involved in the count matrix in 'mat'.
+coldata <- coldata[coldata[,"Derived Array Data File"]=="counts_Calero_20160113.tsv",]
+
+# Only keeping interesting columns, and setting the library names as the row names.
+coldata <- DataFrame(
+    genotype=coldata[,"Characteristics[genotype]"],
+    phenotype=coldata[,"Characteristics[phenotype]"],
+    spike_in=coldata[,"Factor Value[spike-in addition]"],
+    row.names=coldata[,"Source Name"]
+)
+
+coldata
+```
+
+Now, we can take two approaches - either add the `coldata` to our existing `sce`, or start from scratch via the `SingleCellExperiment()` constructor.
+If we start from scratch:
+
+```{r}
+sce <- SingleCellExperiment(assays = list(counts=mat), colData=coldata)
+```
+
+Similar to `assays`, we can see our `colData` is now populated:
+
+```{r}
+sce
+```
+
+We can access our column data with the `colData()` function:
+
+```{r}
+colData(sce)
+```
+
+Or more simply, we can extract a single field using the `$` shortcut:
+
+```{r}
+head(sce$Factor.Value.phenotype.)
+```
+
+Alternatively, we can add `colData` to an existing object, either _en masse_:
+
+```{r}
+sce <- SingleCellExperiment(list(counts=mat))
+colData(sce) <- coldata
+sce
+```
+
+Or piece by piece:
+
+```{r}
+sce <- SingleCellExperiment(list(counts=mat))
+sce$phenotype <- coldata$phenotype
+colData(sce)
+```
+
+Regardless of which strategy you pick, it is very important to make sure that the rows of your `colData` actually refer to the same cells as the columns of your count matrix.
+It is usually a good idea to check that the names are consistent before constructing the `SingleCellExperiment`:
+
+```{r}
+stopifnot(identical(rownames(coldata), colnames(mat)))
+``` 
+
+Some functions automatically add column metadata by returning a `SingleCellExperiment` with extra fields in the `colData` slot.
+For example, the `r Biocpkg("scuttle")` package contains the `addPerCellQC()` function that appends a number of quality control metrics to the `colData`:
+
+```{r}
+sce <- scuttle::addPerCellQC(sce)
+colData(sce)
+```
+
+### On the rows
+
+We store feature-level annotation in the `rowData` slot, a `DataFrame` where each row corresponds to a gene and contains annotations like the transcript length or gene symbol.
+We can manually get and set this with the `rowData()` function, as shown below:
+
+```{r}
+rowData(sce)$Length <- gene.length
+rowData(sce)
+```
+
+Some functions will return a `SingleCellExperiment` with the `rowData` populated with relevant bits of information, such as the `addPerFeatureQC()` function:
+
+```{r}
+sce <- scuttle::addPerFeatureQC(sce)
+rowData(sce)
+```
+
+Furthermore, there is a special `rowRanges` slot to hold genomic coordinates in the form of a `GRanges` or `GRangesList`.
+This stores describes the chromosome, start, and end coordinates of the features (genes, genomic regions) that can be easily queryed and manipulated via the `r Biocpkg("GenomicRanges")` framework.
+In our case, `rowRanges(sce)` produces an empty list because we did not fill it with any coordinate information.
+
+```{r}
+rowRanges(sce) # empty
+```
+
+The manner with which we populate the `rowRanges` depends on the organism and annotation used during alignment and quantification. 
+Here, we have Ensembl identifiers, so we might use `r Biocpkg("rtracklayer")` to load in a `GRanges` from an GTF file containing the Ensembl annotation used in this dataset:
+
+```{r, echo=FALSE, results='asis'}
+collapseStart("Code to download file")
+```
+
+```{r}
+# The paper uses Ensembl 82.
+mm10.gtf <- bfcrpath(bfc, file.path("http://ftp.ensembl.org/pub/release-82",
+    "gtf/mus_musculus/Mus_musculus.GRCm38.82.gtf.gz"))
+```
+
+```{r, echo=FALSE, results='asis'}
+collapseEnd()
+```
+
+```{r}
+gene.data <- rtracklayer::import(mm10.gtf)
+
+# Cleaning up the object.
+gene.data <- gene.data[gene.data$type=="gene"]
+names(gene.data) <- gene.data$gene_id
+is.gene.related <- grep("gene_", colnames(mcols(gene.data)))
+mcols(gene.data) <- mcols(gene.data)[,is.gene.related]
+
+rowRanges(sce) <- gene.data[rownames(sce)]
+rowRanges(sce)[1:10,]
+```
+
+### Other metadata 
+
+Some analyses contain results or annotations that do not fit into the aforementioned slots, e.g., study metadata.
+This can be stored in the `metadata` slot, a named list of arbitrary objects.
+For example, say we have some favorite genes (e.g.,  highly variable genes) that we want to store inside of `sce` for use in our analysis at a later point. 
+We can do this simply by appending to the metadata slot as follows:
+
+```{r}
+my_genes <- c("gene_1", "gene_5")
+metadata(sce) <- list(favorite_genes = my_genes)
+metadata(sce)
+```
+
+Similarly, we can append more information via the `$` operator:
+
+```{r}
+your_genes <- c("gene_4", "gene_8")
+metadata(sce)$your_genes <- your_genes
+metadata(sce)
+```
+
+The main disadvantage of storing content in the `metadata()` is that it will not be synchronized with the rows or columns when subsetting or combining (see next chapter).
+Thus, if an annotation field is related to the rows or columns, we suggest storing it in the `rowData()` or `colData()` instead.
+
+## Subsetting and combining 
+
+One of the major advantages of using the `SingleCellExperiment` is that operations on the rows or columns of the expression data are synchronized with the associated annotation.
+This avoids embarrassing bookkeeping errors where we, e.g., subset the count matrix but forget to subset the corresponding feature/sample annotation. 
+For example, if we subset our `sce` object to the first 10 cells, we can see that both the count matrix and the `colData()` are automatically subsetted:
+
+```{r}
+first.10 <- sce[,1:10]
+ncol(counts(first.10)) # only 10 columns.
+colData(first.10) # only 10 rows.
+```
+
+Similarly, if we only wanted wild-type cells, we could subset our `sce` object based on its `colData()` entries:
+
+```{r}
+wt.only <- sce[, sce$phenotype == "wild type phenotype"]
+ncol(counts(wt.only))
+colData(wt.only)
+```
+
+The same logic applies to the `rowData()`.
+Say we only want to keep protein-coding genes:
+
+```{r}
+coding.only <- sce[rowData(sce)$gene_biotype == "protein_coding",]
+nrow(counts(coding.only))
+rowData(coding.only)
+```
+
+Conversely, if we were to combine multiple `SingleCellExperiment` objects, the class would take care of combining both the expression values and the associated annotation in a coherent manner.
+We can use `cbind()` to combine objects by column, assuming that all objects involved have the same row annotation values and compatible column annotation fields.
+
+```{r}
+sce2 <- cbind(sce, sce)
+ncol(counts(sce2)) # twice as many columns
+colData(sce2) # twice as many rows
+```
+
+Similarly, we can use `rbind()` to combine objects by row, assuming all objects have the same column annotation values and compatible row annotation fields.
+
+```{r}
+sce2 <- rbind(sce, sce)
+nrow(counts(sce2)) # twice as many rows
+rowData(sce2) # twice as many rows
+```
+
+## Single-cell-specific fields
+
+### Background
+
+So far, we have covered the `assays` (primary data), `colData` (cell metadata), `rowData`/`rowRanges` (feature metadata), and `metadata` slots (other) of the `SingleCellExperiment` class.
+These slots are actually inherited from the `SummarizedExperiment` parent class (see `r Biocpkg("SummarizedExperiment", "SummarizedExperiment.html", "here")` for details), so any method that works on a `SummarizedExperiment` will also work on a `SingleCellExperiment` object.
+But why do we need a separate `SingleCellExperiment` class?
+This is motivated by the desire to streamline some single-cell-specific operations, which we will discuss in the rest of this section.
+
+### Dimensionality reduction results
+
+The `reducedDims` slot is specially designed to store reduced dimensionality representations of the primary data obtained by methods such as PCA and $t$-SNE (see Chapter \@ref(dimensionality-reduction) for more details).
+This slot contains a list of numeric matrices of low-reduced representations of the primary data, where the rows represent the columns of the primary data (i.e., cells), and columns represent the dimensions.
+As this slot holds a list, we can store multiple PCA/$t$-SNE/etc. results for the same dataset.
+
+In our example, we can calculate a PCA representation of our data using the `runPCA()` function from `r Biocpkg("scater")`. 
+We see that the `sce` now shows a new `reducedDim` that can be retrieved with the accessor `reducedDim()`.
+
+```{r}
+sce <- scater::logNormCounts(sce)
+sce <- scater::runPCA(sce)
+dim(reducedDim(sce, "PCA"))
+```
+
+We can also calculate a tSNE representation using the `scater` package function `runTSNE()`:
+
+```{r}
+sce <- scater::runTSNE(sce, perplexity = 0.1)
+head(reducedDim(sce, "TSNE"))
+```
+
+We can view the names of all our entries in the `reducedDims` slot via the accessor, `reducedDims()`.
+Note that this is plural and returns a list of all results, whereas `reducedDim()` only returns a single result.
+
+```{r}
+reducedDims(sce)
+```
+
+We can also manually add content to the `reducedDims()` slot, much like how we added matrices to the `assays` slot previously.
+To illustrate, we run the `umap()` function directly from the `r CRANpkg("uwot")` package to generate a matrix of UMAP coordinates that is added to the `reducedDims` of our `sce` object.
+(In practice, `r Biocpkg("scater")` has a `runUMAP()` wrapper function that adds the results for us, but we will manually call `umap()` here for demonstration purposes.)
+
+```{r}
+u <- uwot::umap(t(logcounts(sce)), n_neighbors = 2)
+reducedDim(sce, "UMAP_uwot") <- u
+reducedDims(sce) # Now stored in the object.
+head(reducedDim(sce, "UMAP_uwot"))
+```
+
+### Alternative Experiments
+
+The `SingleCellExperiment` class provides the concept of "alternative Experiments" where we have data for a distinct set of features but the same set of samples/cells.
+The classic application would be to store the per-cell counts for spike-in transcripts; this allows us to retain this data for downstream use but separate it from the `assays` holding the counts for endogenous genes.
+The separation is particularly important as such alternative features often need to be processed separately, see Chapter \@ref(integrating-with-protein-abundance) for examples on antibody-derived tags.
+
+If we have data for alternative feature sets, we can store it in our `SingleCellExperiment` as an alternative Experiment.
+For example, if we have some data for spike-in transcripts, we first create a separate `SummarizedExperiment` object:
+
+```{r}
+# -1 to get rid of the first gene length column.
+spike_se <- SummarizedExperiment(list(counts=spike.mat[,-1]))
+spike_se
+```
+
+Then we store this `SummarizedExperiment` in our `sce` object via the `altExp()` setter.
+Like `assays()` and `reducedDims()`, we can also retrieve all of the available alternative Experiments with `altExps()`.
+
+```{r}
+altExp(sce, "spike") <- spike_se
+altExps(sce)
+```
+
+The alternative Experiment concept ensures that all relevant aspects of a single-cell dataset can be held in a single object.
+It is also convenient as it ensures that our spike-in data is synchronized with the data for the endogenous genes.
+For example, if we subsetted `sce`, the spike-in data would be subsetted to match:
+
+```{r}
+sub <- sce[,1:2] # retain only two samples.
+altExp(sub, "spike")
+```
+
+Any `SummarizedExperiment` object can be stored as an alternative Experiment, including another `SingleCellExperiment`!
+This allows power users to perform tricks like those described in Section \@ref(feature-selection-subsetting).
+
+### Size factors 
+
+The `sizeFactors()` function allows us to get or set a numeric vector of per-cell scaling factors used for normalization (see Chapter \@ref(normalization) for more details).
+This is typically automatically added by normalization functions, as shown below for `r Biocpkg("scran")`'s deconvolution-based size factors:
+
+```{r}
+sce <- scran::computeSumFactors(sce)
+summary(sizeFactors(sce))
+```
+
+Alternatively, we can manually add the size factors, as shown below for library size-derived factors:
+
+```{r}
+sizeFactors(sce) <- scater::librarySizeFactors(sce)
+summary(sizeFactors(sce))
+```
+
+Technically speaking, the `sizeFactors` concept is not unique to single-cell analyses.
+Nonetheless, we mention it here as it is an extension beyond what is available in the `SummarizedExperiment` parent class.
+
+### Column labels
+
+The `colLabels()` function allows us to get or set a vector or factor of per-cell labels,
+typically corresponding to groupings assigned by unsupervised clustering (see Chapter \@ref(clustering))
+or predicted cell type identities from classification algorithms (Chapter \@ref(cell-type-annotation)).
+
+```{r}
+colLabels(sce) <- scran::clusterCells(sce, use.dimred="PCA")
+table(colLabels(sce))
+```
+
+This is a convenient field to set as several functions (e.g., `scran::findMarkers`) will attempt to automatically retrieve the labels via `colLabels()`.
+We can thus avoid the few extra keystrokes that would otherwise be necessary to specify, say, the cluster assignments in the function call.
+
+## Conclusion 
+
+The widespread use of the `SingleCellExperiment` class provides the foundation for interoperability between single-cell-related packages in the Bioconductor ecosystem.
+`SingleCellExperiment` objects generated by one package can be used as input into another package, encouraging synergies that enable our analysis to be greater than the sum of its parts.
+Each step of the analysis will also add new entries to the `assays`, `colData`, `reducedDims`, etc.,
+meaning that the final `SingleCellExperiment` object effectively serves as a self-contained record of the analysis.
+This is convenient as the object can be saved for future use or transferred to collaborators for further analysis.
+Thus, for the rest of this book, we will be using the `SingleCellExperiment` as our basic data structure.
+
+## Session Info {-}
+
+```{r sessionInfo, echo=FALSE, results='asis'}
+prettySessionInfo()
+```

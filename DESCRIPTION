@@ -1,7 +1,7 @@
 Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 1.1.12
-Date: 2020-12-28
+Version: 1.1.13
+Date: 2021-01-04
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 
         person('Aaron', 'Lun', role = c('aut', 'cre'), email="infinite.monkeys.with.keyboards@gmail.com"), 
@@ -19,10 +19,10 @@ Suggests: AnnotationHub,
     AUCell,
     batchelor,
     BiocFileCache,
+    BiocManager,
     BiocNeighbors,
     BiocParallel,
     BiocSingular,
-    BiocStyle,
     bluster,
     celldex,
     cluster,
@@ -44,6 +44,7 @@ Suggests: AnnotationHub,
     iSEE,
     knitr,
     limma,
+    LoomExperiment,
     MouseGastrulationData,
     msigdbr,
     mumosa,
@@ -51,10 +52,13 @@ Suggests: AnnotationHub,
     org.Mm.eg.db,
     PCAtools,
     pheatmap,
+    R.utils,
+    readxl,
     rebook,
     rmarkdown,
     RMTstat,
     robustbase,
+    rtracklayer,
     Rtsne,
     scater,
     scDblFinder,
@@ -72,7 +76,8 @@ Suggests: AnnotationHub,
     TSCAN,
     uwot,
     velociraptor,
-    viridis
+    viridis,
+    zellkonverter
 biocViews: ImmunoOncologyWorkflow,  Workflow,  SingleCellWorkflow
 Workflow: True
 VignetteBuilder: knitr

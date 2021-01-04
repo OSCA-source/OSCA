@@ -23,17 +23,36 @@ url: "`r .gh_url`"
 
 <a href="https://bioconductor.org"><img src="`r rmarkdown::metadata[["cover-image"]]`" width="200" alt="Bioconductor Sticker" align="right" style="margin: 0 1em 0 1em" /></a> 
 
-This is the website for __"Orchestrating Single-Cell Analysis with Bioconductor"__, a book that teaches users some common workflows for the analysis of single-cell RNA-seq data (scRNA-seq). This book will teach you how to make use of cutting-edge Bioconductor tools to process, analyze, visualize, and explore scRNA-seq data. Additionally, it serves as an online companion for the manuscript __"Orchestrating Single-Cell Analysis with Bioconductor"__. 
+## What is this? {-}
 
-While we focus here on scRNA-seq data, a newer technology that profiles transcriptomes at the single-cell level, many of the tools, conventions, and analysis strategies utilized throughout this book are broadly applicable to other types of assays. By learning the grammar of Bioconductor workflows, we hope to provide you a starting point for the exploration of your own data, whether it be scRNA-seq or otherwise. 
+This is the website for __"Orchestrating Single-Cell Analysis with Bioconductor"__, a book that teaches users some common workflows for the analysis of single-cell RNA-seq data (scRNA-seq). 
+This book will teach you how to make use of cutting-edge [Bioconductor](https://bioconductor.org) tools to process, analyze, visualize, and explore scRNA-seq data. 
+Additionally, it serves as an online companion for the [__"Orchestrating Single-Cell Analysis with Bioconductor"__ paper](https://www.nature.com/articles/s41592-019-0654-x). 
 
-This book is organized into three parts. In the _Preamble_, we introduce the book and dive into resources for learning R and Bioconductor (both at a beginner and developer level). Part I ends with a tutorial for a key data infrastructure, the _SingleCellExperiment_ class, that is used throughout Bioconductor for single-cell analysis and in the subsequent section. 
+## Why does this exist? {-}
 
-The second part, _Focus Topics_, begins with an overview of the framework for analysis of scRNA-seq data, with deeper dives into specific topics are presented in each subsequent chapter. 
+This book was conceived in the fall of 2018, as single-cell RNA-seq analysis continued its rise in prominence in the field of biology. 
+With its rapid growth, and the ongoing developments within Bioconductor tailored specifically for scRNA-seq, it became apparent that an update to the [Orchestrating high-throughput genomic analysis with Bioconductor](https://www.nature.com/articles/nmeth.3252) paper was necessary for the age of single-cell studies.
+We strive to highlight the fantastic software in the Bioconductor project and showcase the Bioconductor community at large in continually pushing forward the field of biological analysis. 
 
-The third part, _Workflows_, provides primarily code detailing the analysis of various datasets throughout the book.
+The book aims to provide a solid foundation in the use of Bioconductor tools for scRNA-seq analysis by walking through various steps of typical workflows using example datasets.
+While we focus here on scRNA-seq data, many of the tools, conventions, and analysis strategies utilized throughout this book are broadly applicable to other types of assays. 
+By learning the grammar of Bioconductor workflows, we hope to provide users with a starting point for the exploration of their own data - scRNA-seq or otherwise. 
 
-Finally, the _Appendix_ highlights our contributors.
+## Who is this for? {-}
+
+Different aspects of this book will be of interest to different audiences:
+
+- In _Getting started_, we introduce the general structure of scRNA-seq analyses, as well as some pointers to how to learn more about R and Bioconductor in general.
+This is written with the interested experimental biologist in mind, and do our best to make few assumptions on previous programming or statistical experience. 
+- In _Focus topics_, we perform deep dives into specific topics and the various options that are available at each step.
+This is intended for bioinformaticians who are looking for a starting point from which to get into single-cell RNA-seq analysis. 
+- In _Workflows_, we provide code detailing the analysis of various datasets throughout the book.
+This has limited exposition and is written for seasoned analysts who already understand the fine print and just want to copy-paste code.
+
+We welcome any and all feedback for improving this book to help increase accessibility and refine technical details.
+
+## How do I cite it? {-}
 
 If you would like to cite this work, please use the reference [__"Orchestrating Single-Cell Analysis with Bioconductor"__](https://www.nature.com/articles/s41592-019-0654-x). 
 
@@ -42,7 +61,6 @@ If you would like to cite this work, please use the reference [__"Orchestrating 
 The book is written in [RMarkdown](https://rmarkdown.rstudio.com) with [bookdown](https://bookdown.org). OSCA is a collaborative effort, supported by various folks from the Bioconductor team who have contributed workflows, fixes, and improvements.
 
 This website is __free to use__, and is licensed under the [Creative Commons Attribution-NonCommercial-NoDerivs 3.0](http://creativecommons.org/licenses/by-nc-nd/3.0/us/) License.
-
 
 ```{r include=FALSE}
 ## automatically create a bib database for R packages

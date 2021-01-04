@@ -42,4 +42,14 @@ Charlotte Soneson (Friedrich Miescher Institute, Switzerland), for many formatti
 
 Al J Abadi (University of Melbourne, Australia), for bringing the log-normalization corner case to our attention.
 
-Philippe Boileau (University of California Berkeley, USA), for demonstrations on how to use scPCA. 
+Philippe Boileau (University of California Berkeley, USA), for demonstrations on how to use `r Biocpkg("scPCA")`. 
+
+Pierre-Luc Germain (ETH Zürich), for improvements to the doublet chapter involving `r Biocpkg("scDblFinder")`.
+
+### Further comments {-}
+
+We would like to thank the Bioconductor core team and the emerging targets subcommittee for commissioning this work, along with all our contributors to the companion manuscript of this book.
+
+We would also like to thank all Bioconductor contributors for their efforts in creating a cutting-edge repository of software for biological data analysis. 
+It is truly extraordinary to chart the growth of Bioconductor over the years. 
+We are thankful for the wonderful community of scientists and developers alike that together make the Bioconductor community special.
