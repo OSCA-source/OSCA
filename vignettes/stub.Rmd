@@ -1,16 +1,17 @@
 ---
-title: Source code for OrchestratingSingleCellAnalysis
-package: OSCA
-date: "`r Sys.Date()`"
 vignette: >
-  %\VignetteIndexEntry{Source code}
+  %\VignetteIndexEntry{Link to book}
   %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}    
-output: 
-  BiocStyle::html_document:
-    titlecaps: false
-    toc: false
----
+  %\VignetteEncoding{UTF-8}
+---    
 
-Source code for this book can be found at https://github.com/Bioconductor/OrchestratingSingleCellAnalysis.
+```{r, echo=FALSE}
+# Some compileable code, apparently needed for the engine
+# to recognize this as Rmarkdown.
+link <- BiocStyle::Biocbook("OSCA", label="link")
+URL <- sub(".*\\((.+))", "\\1", link)
+```
 
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="`r sprintf("0; URL=%s", URL)`">
+<link rel="canonical" href="`r URL`">
