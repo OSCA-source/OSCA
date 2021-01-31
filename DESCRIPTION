@@ -25,7 +25,7 @@ Depends: BiocStyle,
     knitr,
     rebook,
     rmarkdown
-Suggests:
+Suggests: 
     OSCA.intro,
     OSCA.basic,
     OSCA.advanced,
