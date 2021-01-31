@@ -1,0 +1,20 @@
+bookdown::gitbook:
+  css: style.css
+  config:
+    fontsettings:
+      theme: white
+    toc:
+      before: |
+        <li><a href="./">Orchestrating Single-Cell Analysis</a></li>
+      after: |
+        <li><a href="https://bioconductor.org" target="blank">Published by Bioconductor</a></li>
+    download: null
+    edit: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis/edit/master/%s
+    view: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis/blob/master/%s
+    history: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis/commits/master/%s
+    sharing:
+      github: yes
+      facebook: yes
+      twitter: yes
+      linkedin: yes
+

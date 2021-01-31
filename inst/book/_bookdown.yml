@@ -1,0 +1,12 @@
+book_filename: "OSCA"
+pagetitle: "Orchestrating Single-Cell Analysis with Bioconductor"
+delete_merged_file: true
+new_session: true
+language:
+  ui:
+    chapter_name: "Chapter "
+cover-image: "images/cover.png"
+output_dir: "docs"
+rmd_files: ["index.Rmd",
+    "contents.Rmd",
+    "about-the-contributors.Rmd"]

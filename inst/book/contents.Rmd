@@ -1,0 +1,52 @@
+# Book contents {-}
+
+```{r setup, echo=FALSE, results="asis"}
+knitr::opts_chunk$set(error=FALSE, warning=FALSE)
+library(BiocStyle)
+```
+
+The OSCA book is actually a collection of several sub-books spanning a variety of topics and different levels of assumed reader knowledge.
+Each sub-book is generated using `r CRANpkg("bookdown")`, compiled twice a week to ensure that the examples still run on the current R/Bioconductor code base.
+Interlinking between related topics enable readers to seamlessly transition within a sub-book, and even between different sub-books.
+To get started, click on the links below to navigate to each sub-book.
+
+## `r Biocbook("OSCA.intro", label="Introduction")` {-}
+
+```{r, results="asis", echo=FALSE}
+text <- packageDescription("OSCA.intro")$Description
+remainders <- strsplit(text, "\\.\\s")[[1]][-1]
+remainders <- gsub("SingleCellExperiment", "`SingleCellExperiment`", remainders)
+remainders <- paste(remainders, collapse=". ")
+cat(remainders)
+```
+
+## `r Biocbook("OSCA.basic", label="Basics")` {-}
+
+```{r, results="asis", echo=FALSE}
+text <- packageDescription("OSCA.basic")$Description
+remainders <- strsplit(text, "\\.\\s")[[1]][-1]
+remainders <- sub("^\\s+", "", remainders)
+remainders <- paste(remainders, collapse=". ")
+cat(remainders, sep="\n")
+```
+
+## `r Biocbook("OSCA.advanced", label="Advanced")` {-}
+
+```{r, results="asis", echo=FALSE}
+text <- packageDescription("OSCA.advanced")$Description
+remainders <- strsplit(text, "\\.\\s")[[1]][-1]
+remainders <- sub("^\\s+", "", remainders)
+remainders <- paste(remainders, collapse=". ")
+cat(remainders, sep="\n")
+```
+
+## `r Biocbook("OSCA.workflow", label="Workflows")` {-}
+
+```{r, results="asis", echo=FALSE}
+text <- packageDescription("OSCA.workflows")$Description
+remainders <- strsplit(text, "\\.\\s")[[1]][-1]
+remainders <- gsub("SingleCellExperiment", "`SingleCellExperiment`", remainders)
+remainders <- sub("^\\s+", "", remainders)
+remainders <- paste(remainders, collapse=". ")
+cat(remainders, sep="\n")
+```
