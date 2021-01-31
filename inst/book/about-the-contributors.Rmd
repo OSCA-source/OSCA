@@ -34,17 +34,20 @@ Raphael Gottardo is the Scientific Director of the Translational Data Science In
 
 ### Acknowledgements {-}
 
-Firstly, we would like to thank all Bioconductor contributors for their efforts in creating the definitive leading-edge repository of software for biological analysis. 
-It is truly extraordinary to chart the growth of Bioconductor over the years. 
-We are thankful for the wonderful community of scientists and developers alike that together make the Bioconductor community special.
-
-We would also like to thank the Bioconductor core team and the emerging targets subcommittee for commissioning this work.
-
-There have been many contributors over the years, and I probably haven't remembered them all, so don't be offended if you don't spot yourself below:
+We thank the Bioconductor core team and the emerging targets subcommittee for commissioning this work, 
+along with all our contributors to the companion manuscript of this book.
+For the book itself, there have been many contributors over the years, and I probably haven't remembered them all, so don't be offended if you don't spot yourself below:
 
 - Levi Waldron (City University of New York, USA), for advice on the code-related aspects of managing the online version of this book.
 - Kevin Rue-Albrecht (University of Oxford, United Kingdom), for contributing the interactive data analysis chapter.
 - Charlotte Soneson (Friedrich Miescher Institute, Switzerland), for many formatting and typographical fixes.
 - Al J Abadi (University of Melbourne, Australia), for bringing the log-normalization corner case to our attention.
 - Philippe Boileau (University of California Berkeley, USA), for demonstrations on how to use scPCA. 
+- Pierre-Luc Germain (ETH Zürich), for improvements to the doublet chapter involving `r Biocpkg("scDblFinder")`.
 - Peter Hickey (WEHI, Australia), for spotting and fixing many typos.
+
+Finally, we would like to thank all Bioconductor contributors for their efforts in creating the definitive leading-edge repository of software for biological analysis. 
+It is truly extraordinary to chart the growth of Bioconductor over the years. 
+We are thankful for the wonderful community of scientists and developers alike that together make the Bioconductor community special.
+
+
