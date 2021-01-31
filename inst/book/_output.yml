@@ -9,9 +9,9 @@ bookdown::gitbook:
       after: |
         <li><a href="https://bioconductor.org" target="blank">Published by Bioconductor</a></li>
     download: null
-    edit: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis/edit/master/%s
-    view: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis/blob/master/%s
-    history: https://github.com/Bioconductor/OrchestratingSingleCellAnalysis/commits/master/%s
+    edit: https://github.com/LTLA/OSCA/edit/master/inst/book/%s
+    view: https://github.com/LTLA/OSCA/blob/master/inst/book/%s
+    history: https://github.com/LTLA/OSCA/commits/master/inst/book/%s
     sharing:
       github: yes
       facebook: yes
