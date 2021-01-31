@@ -1,7 +1,25 @@
-# If you're reading this...
+# OSCA book, overview
 
-You're probably at the wrong place!
+This repository contains a Bioconductor package to deploy the landing subbook of the **Orchestrating Single-Cell Analysis** book.
+Install all relevant packages used in the book with:
 
-If you're looking for the compiled book, go to https://osca.bioconductor.org.
+```r
+BiocManager::install(remotes::local_package_deps(dependencies=TRUE))
+```
 
-If you're looking for the book sources, go to https://github.com/Bioconductor/OrchestratingSingleCellAnalysis.
+Building the book can be done by either running the usual **bookdown** invocation in `inst/book`:
+
+```r
+bookdown::render_book("index.Rmd")
+```
+
+Or by `R CMD build` on the package itself to compile the book during the vignette build process.
+
+To contribute reports, follow standard procedure: fork and PR.
+This requires updating of files in `inst/rebook` to support links from external packages.
+The updates are usually handled by the GitHub Action but can be done manually with:
+
+```r
+rebook::updateDependencies("inst/book", path='DESCRIPTION')
+rebook::configureBook()
+```

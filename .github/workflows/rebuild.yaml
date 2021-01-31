@@ -1,0 +1,26 @@
+on:
+  push
+
+name: rebuild
+
+jobs:
+  rebuild:
+    name: "Rebuilding dependency list."
+    runs-on: ubuntu-latest
+    container: bioconductor/bioconductor_docker:devel
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v2
+      - name: Update DESCRIPTION and Makefile
+        run: |
+          BiocManager::install('LTLA/rebook')
+          rebook::updateDependencies("inst/book", path='DESCRIPTION')
+          rebook::configureBook()
+        shell: Rscript {0}
+      - name: Committing to master
+        run: | 
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Rebuilding sundries." || true
+          git push
