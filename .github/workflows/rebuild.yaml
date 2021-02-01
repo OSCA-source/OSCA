@@ -15,7 +15,7 @@ jobs:
         run: |
           BiocManager::install('LTLA/rebook')
           rebook::updateDependencies("inst/book", path='DESCRIPTION')
-          rebook::configureBook()
+          rebook::configureBook(redirect='redirect.txt')
         shell: Rscript {0}
       - name: Committing to master
         run: | 

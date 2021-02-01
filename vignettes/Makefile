@@ -5,3 +5,4 @@ compiled:
 	cd book && "${R_HOME}/bin/R" -e "bookdown::render_book('index.Rmd')"
 	mkdir ../inst/doc && mv book/docs ../inst/doc/book
 	rm -rf book/
+	"${R_HOME}/bin/R" -e "rebook::createRedirects(file='redirect.txt')"
