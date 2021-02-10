@@ -15,6 +15,7 @@ To get started, click on the links below to navigate to each sub-book.
 ```{r, results="asis", echo=FALSE}
 text <- packageDescription("OSCA.intro")$Description
 remainders <- strsplit(text, "\\.\\s")[[1]][-1]
+remainders <- sub("^\\s+", "", remainders)
 remainders <- gsub("SingleCellExperiment", "`SingleCellExperiment`", remainders)
 remainders <- paste(remainders, collapse=". ")
 cat(remainders)
