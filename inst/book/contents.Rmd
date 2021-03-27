@@ -41,6 +41,16 @@ remainders <- paste(remainders, collapse=". ")
 cat(remainders, sep="\n")
 ```
 
+## `r Biocbook("OSCA.multisample", label="Multi-sample")` {-}
+
+```{r, results="asis", echo=FALSE}
+text <- packageDescription("OSCA.multisample")$Description
+remainders <- strsplit(text, "\\.\\s")[[1]][-1]
+remainders <- sub("^\\s+", "", remainders)
+remainders <- paste(remainders, collapse=". ")
+cat(remainders, sep="\n")
+```
+
 ## `r Biocbook("OSCA.workflow", label="Workflows")` {-}
 
 ```{r, results="asis", echo=FALSE}
