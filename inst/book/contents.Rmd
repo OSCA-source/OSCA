@@ -51,7 +51,7 @@ remainders <- paste(remainders, collapse=". ")
 cat(remainders, sep="\n")
 ```
 
-## `r Biocbook("OSCA.workflow", label="Workflows")` {-}
+## `r Biocbook("OSCA.workflows", label="Workflows")` {-}
 
 ```{r, results="asis", echo=FALSE}
 text <- packageDescription("OSCA.workflows")$Description
