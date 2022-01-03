@@ -29,4 +29,5 @@ Suggests:
     OSCA.intro,
     OSCA.basic,
     OSCA.advanced,
-    OSCA.workflows
+    OSCA.workflows,
+    OSCA.multisample
