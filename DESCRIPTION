@@ -1,12 +1,13 @@
 Package: OSCA
 Title: Orchestrating Single Cell Analysis with Bioconductor
-Version: 1.7.1
-Date: 2022-05-18
+Version: 1.7.2
+Date: 2022-09-05
 Authors@R: c( 
         person('Robert', 'Amezquita', role = c('aut')), 
-        person('Aaron', 'Lun', role = c('aut', 'cre'), email="infinite.monkeys.with.keyboards@gmail.com"), 
+        person('Aaron', 'Lun', role = c('aut')), 
         person('Stephanie', 'Hicks', role = 'aut'), 
-        person('Raphael', 'Gottardo', role = 'aut') 
+        person('Raphael', 'Gottardo', role = 'aut'),
+        person("Alan", "O'Callaghan", role = 'cre', email = "alan.ocallaghan@outlook.com")
     )
 Description: 
     Online book for orchestrating single cell analysis with Bioconductor. 
