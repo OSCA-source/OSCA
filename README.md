@@ -23,3 +23,10 @@ The updates are usually handled by the GitHub Action but can be done manually wi
 rebook::updateDependencies("inst/book", path='DESCRIPTION')
 rebook::configureBook(redirect='redirect.txt')
 ```
+
+# BBS Build reports
+
+Build reports are available from: 
+
+- [devel](http://bioconductor.org/checkResults/devel/books-LATEST/OSCA)
+- [release](http://bioconductor.org/checkResults/release/books-LATEST/OSCA)
