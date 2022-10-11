@@ -8,6 +8,9 @@ jobs:
     name: "Rebuilding dependency list."
     runs-on: ubuntu-latest
     container: bioconductor/bioconductor_docker:devel
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out repo
         uses: actions/checkout@v2
