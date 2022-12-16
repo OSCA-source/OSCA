@@ -13,15 +13,15 @@ jobs:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Update DESCRIPTION and Makefile
         run: |
           BiocManager::install('LTLA/rebook')
           rebook::updateDependencies("inst/book", path='DESCRIPTION')
           rebook::configureBook(redirect='redirect.txt')
         shell: Rscript {0}
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+      # - name: Setup tmate session
+      #   uses: mxschmitt/action-tmate@v3
       - name: Committing to master
         run: | 
           git config --local user.email "action@github.com"
